@@ -1,0 +1,5 @@
+# Dependencias para el Python de Windows dentro del prefijo de Wine (no el venv de Linux).
+# numpy fijado a 1.26.4: Wine 9.0 no implementa ucrtbase.dll.crealf/cimagf, necesarias
+# por numpy>=2.0, y el proceso aborta al hacer "import numpy". 1.26.4 no la necesita.
+MetaTrader5
+numpy==1.26.4

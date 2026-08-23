@@ -1,0 +1,209 @@
+"""Linea base simple (gradient boosting) para saber si hay señal predictiva real en
+las features, independientemente de la arquitectura de red neuronal.
+
+En vez de secuencias multi-temporalidad, usa solo el ultimo valor de cada feature por
+temporalidad (snapshot actual de D1+H1+M15+M5 concatenado) y un HistGradientBoosting
+sobre eso. Entrena en segundos por fold, así que corre los mismos folds de walk-forward
+(mismos limites, misma ventana expansiva) para comparar directo contra el transformer.
+
+No hace backtest de trading (no predice entry/tp/sl) — mide directamente si el modelo
+acierta la DIRECCION mejor que el azar/la clase mayoritaria, que es la pregunta de fondo:
+¿hay señal aqui o no?
+
+Uso:
+    python scripts/baseline_gbm.py --symbol EURUSD --n-folds 5
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import numpy as np  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+from sklearn.ensemble import HistGradientBoostingClassifier  # noqa: E402
+from sklearn.metrics import classification_report, confusion_matrix  # noqa: E402
+
+from config.settings import get_settings  # noqa: E402
+from tradingai.ai.data.features.pipeline import build_feature_pipeline, select_feature_columns  # noqa: E402
+from tradingai.ai.data.loader import load_csv  # noqa: E402
+from tradingai.ai.data.multi_timeframe import TIMEFRAMES, flatten_last_timestep  # noqa: E402
+from tradingai.ai.data.preprocessor import normalize_ohlcv  # noqa: E402
+from tradingai.ai.evaluation.backtester import Backtester, summarize  # noqa: E402
+from tradingai.ai.training.dataset import MultiTimeframeTradingDataset  # noqa: E402
+from tradingai.core.signal import Direction, TradingSignal  # noqa: E402
+from tradingai.utils.logging import setup_logging  # noqa: E402
+from tradingai.utils.seed import set_seed  # noqa: E402
+
+from loguru import logger  # noqa: E402
+
+DIRECTION_NAMES = {0: "neutral", 1: "long", 2: "short"}
+_DIRECTION_MAP = {0: Direction.NEUTRAL, 1: Direction.LONG, 2: Direction.SHORT}
+
+# Mismos multiplicadores fijos que usa el etiquetado por triple-barrera
+# (ai/training/dataset.py::triple_barrier_labels) para construir TP/SL reales a
+# partir de la direccion predicha, y poder correr el mismo Backtester que el
+# transformer para una comparacion directa de win_rate/pnl.
+TP_ATR_MULT = 2.0
+SL_ATR_MULT = 1.0
+
+
+def _pip_size(symbol: str) -> float:
+    if symbol.upper().endswith("JPY") or symbol.upper() in {"XAUUSD", "XAGUSD"}:
+        return 0.01
+    return 0.0001
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--symbol", required=True)
+    parser.add_argument("--n-folds", type=int, default=5)
+    parser.add_argument("--internal-val-split", type=float, default=0.15)
+    parser.add_argument("--confidence-threshold", type=float, default=0.5, help="Umbral de prob. maxima para medir precision en subset 'seguro'")
+    parser.add_argument("--backtest-step", type=int, default=20, help="Espaciado entre anchors para el backtest (evita operaciones solapadas); la accuracy de clasificacion usa todos los ejemplos igual")
+    parser.add_argument("--data-dir", default=None)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+
+    set_seed(args.seed)
+    config = get_settings()
+    setup_logging(config["secrets"].log_level, config["paths"]["logs_dir"])
+
+    data_dir = Path(args.data_dir or config["paths"]["raw_data"])
+    candles_by_tf = {tf: load_csv(data_dir / f"{args.symbol}_{tf}.csv") for tf in TIMEFRAMES}
+    features_by_tf = {tf: normalize_ohlcv(build_feature_pipeline(candles_by_tf[tf], config)) for tf in TIMEFRAMES}
+    feature_columns = select_feature_columns(features_by_tf["M15"])
+
+    seq_len_by_tf = config["model"]["sequence_length"]
+    dataset = MultiTimeframeTradingDataset(features_by_tf, feature_columns, seq_len_by_tf)
+    n = len(dataset)
+    logger.info(f"[{args.symbol}] Dataset total: {n} ejemplos alineados")
+
+    X = flatten_last_timestep(dataset.sequences)
+    y = dataset.direction
+    logger.info(f"X shape: {X.shape}")
+
+    fold_bounds = [int(n * i / args.n_folds) for i in range(args.n_folds + 1)]
+    logger.info(f"Limites de fold: {fold_bounds}")
+
+    fold_accuracies = []
+    fold_majority_accuracies = []
+
+    for fold in range(1, args.n_folds):
+        train_end = fold_bounds[fold]
+        test_start, test_end = fold_bounds[fold], fold_bounds[fold + 1]
+        internal_val_start = int(train_end * (1 - args.internal_val_split))
+
+        X_train, y_train = X[:internal_val_start], y[:internal_val_start]
+        X_test, y_test = X[test_start:test_end], y[test_start:test_end]
+
+        t0 = time.time()
+        model = HistGradientBoostingClassifier(random_state=args.seed, max_iter=200, early_stopping=True)
+        model.fit(X_train, y_train)
+        train_time = time.time() - t0
+
+        y_pred = model.predict(X_test)
+        y_proba = model.predict_proba(X_test)
+        accuracy = (y_pred == y_test).mean()
+
+        majority_class = np.bincount(y_train, minlength=3).argmax()
+        majority_accuracy = (y_test == majority_class).mean()
+
+        confident_mask = y_proba.max(axis=1) >= args.confidence_threshold
+        confident_accuracy = (y_pred[confident_mask] == y_test[confident_mask]).mean() if confident_mask.any() else float("nan")
+
+        fold_accuracies.append(accuracy)
+        fold_majority_accuracies.append(majority_accuracy)
+
+        # Backtest real: mismos multiplicadores ATR fijos que usa el etiquetado, para
+        # comparar win_rate/pnl directo contra los folds del transformer (walk_forward.py).
+        # Se espacian los anchors (--backtest-step) para no abrir una operacion en cada
+        # vela M15 consecutiva -- sin esto, miles de "operaciones" solapadas en el tiempo
+        # se suman como si fueran independientes y el pnl total pierde todo sentido.
+        m15_features = features_by_tf["M15"]
+        anchor_idx_test = dataset.anchor_positions[test_start:test_end]
+        strided_local_indices = range(0, len(anchor_idx_test), args.backtest_step)
+        signals = []
+        for local_i in strided_local_indices:
+            m15_row_idx = anchor_idx_test[local_i]
+            direction_idx = int(y_pred[local_i])
+            direction = _DIRECTION_MAP[direction_idx]
+            confidence = float(y_proba[local_i, direction_idx])
+
+            entry_price = float(m15_features["close"].iloc[m15_row_idx])
+            atr = float(m15_features["atr_14"].iloc[m15_row_idx])
+
+            take_profit = stop_loss = None
+            if direction != Direction.NEUTRAL and atr > 0:
+                sign = 1 if direction == Direction.LONG else -1
+                take_profit = entry_price + sign * TP_ATR_MULT * atr
+                stop_loss = entry_price - sign * SL_ATR_MULT * atr
+
+            signals.append(
+                (
+                    m15_row_idx,
+                    TradingSignal(
+                        symbol=args.symbol,
+                        timeframe="M15",
+                        timestamp=datetime.now(timezone.utc),
+                        direction=direction,
+                        confidence=confidence,
+                        entry_price=entry_price,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                    ),
+                )
+            )
+
+        backtest_cfg = config.get("backtest", {})
+        backtester = Backtester(
+            confidence_threshold=0.0,
+            max_holding_bars=backtest_cfg.get("max_holding_bars", 50),
+            spread_pips=backtest_cfg.get("spread_pips", 1.0),
+            slippage_pips=backtest_cfg.get("slippage_pips", 0.2),
+            commission_pips=backtest_cfg.get("commission_pips", 0.0),
+            pip_size=_pip_size(args.symbol),
+        )
+        trades = backtester.run(candles_by_tf["M15"], signals)
+        trade_stats = summarize(trades)
+
+        logger.info(
+            f"=== Fold {fold}/{args.n_folds - 1} === train={internal_val_start} test={test_end - test_start} "
+            f"({train_time:.1f}s)"
+        )
+        logger.info(
+            f"Fold {fold}: accuracy={accuracy * 100:.1f}% (baseline clase mayoritaria={majority_accuracy * 100:.1f}%) "
+            f"| confianza>={args.confidence_threshold}: {confident_mask.sum()}/{len(y_test)} casos, "
+            f"accuracy en esos={confident_accuracy * 100:.1f}%"
+        )
+        report = classification_report(
+            y_test, y_pred, labels=[0, 1, 2], target_names=["neutral", "long", "short"], zero_division=0
+        )
+        logger.info(f"Fold {fold} classification report:\n{report}")
+        logger.info(f"Fold {fold} matriz de confusion (filas=real, cols=prediccion) [neutral, long, short]:\n{confusion_matrix(y_test, y_pred, labels=[0, 1, 2])}")
+        if trade_stats["n_trades"] > 0:
+            logger.info(
+                f"Fold {fold} BACKTEST (comparable a walk_forward.py): {trade_stats['n_trades']} operaciones, "
+                f"win_rate={trade_stats['win_rate'] * 100:.1f}%, pnl={trade_stats['total_pnl_pct'] * 100:.2f}%"
+            )
+        else:
+            logger.info(f"Fold {fold} BACKTEST: 0 operaciones")
+
+    logger.info("=== Resumen linea base (gradient boosting) ===")
+    for i, (acc, maj) in enumerate(zip(fold_accuracies, fold_majority_accuracies), start=1):
+        beats = "SUPERA" if acc > maj else "NO supera"
+        logger.info(f"Fold {i}: accuracy={acc * 100:.1f}% vs baseline mayoritaria={maj * 100:.1f}% -> {beats}")
+    logger.info(
+        f"Accuracy media: {np.mean(fold_accuracies) * 100:.1f}% "
+        f"(baseline mayoritaria media: {np.mean(fold_majority_accuracies) * 100:.1f}%)"
+    )
+
+
+if __name__ == "__main__":
+    main()

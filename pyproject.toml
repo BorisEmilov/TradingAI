@@ -1,0 +1,51 @@
+[project]
+name = "tradingai"
+version = "0.1.0"
+description = "IA entrenable para analisis tecnico (SMC, gaps, acumulacion/distribucion) con ejecucion automatica en MetaTrader 5"
+requires-python = ">=3.10"
+readme = "README.md"
+
+dependencies = [
+    # --- Core ---
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0",
+    "loguru>=0.7",
+    "typer>=0.12",
+
+    # --- AI / ML ---
+    "torch>=2.3",
+    "scikit-learn>=1.5",
+    "pandas-ta>=0.3.14b0",
+    "matplotlib>=3.9",
+    "plotly>=5.22",
+    "joblib>=1.4",
+    "pyarrow>=16.0",
+
+    # --- MT5 ---
+    # El paquete 'MetaTrader5' NO se instala aqui: solo funciona con un terminal MT5
+    # real (Windows). Este proyecto habla con el bridge en wine_bridge/server.py via
+    # HTTP; ver README > "MT5 en Linux" y wine_bridge/requirements-wine.txt.
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[tool.ruff]
+line-length = 100
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

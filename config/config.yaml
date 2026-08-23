@@ -1,0 +1,85 @@
+# Configuracion general del proyecto (no sensible; las credenciales van en .env)
+
+trading:
+  mode: paper                 # paper | live
+  symbols: ["EURUSD", "GBPUSD", "XAUUSD", "USDJPY", "US500"]
+  risk_per_trade_pct: 1.0
+  max_open_positions: 3
+  max_daily_drawdown_pct: 5.0
+  min_risk_reward_ratio: 2.0   # piso duro: la IA puede pedir mas, nunca menos (ver RiskManager)
+
+  # Horario permitido en UTC (7-21 cubre solapamiento Londres/Nueva York, evita las
+  # horas mas ilíquidas de la sesion asiatica en solitario). null = sin restriccion.
+  trading_hours_utc: [7, 21]
+
+  # Simbolos que se mueven juntos: evita acumular exposicion direccional duplicada
+  # (ej. LONG EURUSD + LONG GBPUSD al mismo tiempo es casi la misma apuesta contra USD).
+  correlated_groups:
+    - ["EURUSD", "GBPUSD"]
+    - ["USDJPY"]
+    - ["XAUUSD"]
+    - ["US500"]
+  max_correlated_same_direction: 2
+
+backtest:
+  # Costes de ida y vuelta por operacion (ver Backtester). Valores por defecto tipicos
+  # de una cuenta retail en EURUSD; ajustar segun el broker/simbolo real.
+  spread_pips: 1.0
+  slippage_pips: 0.2
+  commission_pips: 0.0          # 0 en cuentas solo-spread; las ECN suelen cobrar aparte
+  max_holding_bars: 50
+
+features:
+  smc:
+    enabled: true
+    swing_lookback: 5           # velas a cada lado para detectar swing highs/lows
+    ob_lookback: 50             # ventana para buscar order blocks
+    liquidity_lookback: 100     # ventana para equal highs/lows (liquidity pools)
+  fvg:
+    enabled: true
+    min_gap_size_pips: 2.0
+  volume_profile:
+    enabled: true
+    bins: 50
+    value_area_pct: 70          # % de volumen que define la "value area"
+  indicators:
+    enabled: true
+    include: ["ema", "rsi", "atr", "macd", "bollinger"]
+
+model:
+  # Analisis top-down multi-temporalidad: bias en D1 -> estructura en H1 -> entrada
+  # en M15 (por defecto) o M5 (casos puntuales, ver EntryTimeframeHead). Las entradas
+  # SIEMPRE se ejecutan en M15 o M5 — nunca en D1/H1, que solo aportan contexto.
+  architecture: transformer     # transformer | lstm (encoder usado en cada temporalidad)
+
+  # Velas de contexto que ve el modelo en cada temporalidad.
+  sequence_length:
+    D1: 60      # ~3 meses de sesgo diario
+    H1: 100      # ~4 dias de estructura
+    M15: 96       # ~1 dia de contexto para la entrada
+    M5: 60         # ~5 horas de detalle fino
+
+  hidden_size: 128         # tamano del embedding de cada encoder de temporalidad
+  fusion_hidden_size: 256  # tamano tras combinar las 4 temporalidades
+  num_layers: 2
+  num_heads: 4
+  dropout: 0.1
+  batch_size: 64
+  learning_rate: 0.0001
+  epochs: 100
+  early_stopping_patience: 20
+
+  # Cabezas de prediccion del modelo
+  outputs:
+    direction: ["long", "short", "neutral"]
+    predict_entry: true
+    predict_tp: true
+    predict_sl: true
+    entry_timeframe: ["M15", "M5"]   # en cual ejecutar la entrada
+    confidence_threshold: 0.6         # confianza minima para generar una senal operable
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed
+  models_dir: data/models
+  logs_dir: logs
