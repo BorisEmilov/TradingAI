@@ -33,6 +33,9 @@ import pandas_ta as ta
 _DUMMY_CLOSE = pd.Series(np.linspace(1.0, 1.1, 300))
 _MACD_COLUMNS = list(ta.macd(_DUMMY_CLOSE).columns)
 _BBANDS_COLUMNS = list(ta.bbands(_DUMMY_CLOSE, length=20).columns)
+_DUMMY_HIGH = _DUMMY_CLOSE + 0.001
+_DUMMY_LOW = _DUMMY_CLOSE - 0.001
+_ADX_COLUMNS = list(ta.adx(_DUMMY_HIGH, _DUMMY_LOW, _DUMMY_CLOSE, length=14).columns)
 
 # De las bandas de Bollinger, BBL/BBM/BBU son niveles de precio (se normalizan);
 # BBB (bandwidth) y BBP (percent-b) ya son relativos y se dejan tal cual.
@@ -86,5 +89,13 @@ def add_indicators(df: pd.DataFrame, include: list[str] | None = None) -> pd.Dat
             if col in bbands.columns:
                 bbands[col] = _pct_of_close(bbands[col], close)
         out = pd.concat([out, bbands], axis=1)
+
+    if "adx" in include:
+        # ADX/+DI/-DI ya son valores 0-100 (fuerza/direccion de tendencia), escala-
+        # invariante entre simbolos por construccion -> no necesita normalizacion.
+        # Filtro de regimen institucional estandar: las mesas trend-following solo
+        # operan tendencia con ADX alto, y las de mean-reversion prefieren ADX bajo.
+        adx = _safe_frame(ta.adx(out["high"], out["low"], close, length=14), out.index, _ADX_COLUMNS)
+        out = pd.concat([out, adx], axis=1)
 
     return out

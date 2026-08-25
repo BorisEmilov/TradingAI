@@ -10,10 +10,16 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
 # Env / secrets
 .env
 *.env.local
+
+# Salida de procesos lanzados en segundo plano (nohup, bridge MT5, reentrenos manuales)
+nohup.out
 
 # Data & modelos (pesados / generados)
 data/raw/*
@@ -34,3 +40,8 @@ logs/*
 .DS_Store
 .vscode/
 .idea/
+
+# Estado local de Claude Code (locks, checkpoints, mailbox de sesion) -- ya excluido
+# via .git/info/exclude en este checkout, pero se agrega aqui tambien para que
+# cualquier clon nuevo del repo lo ignore sin depender de config local por maquina.
+.claude/

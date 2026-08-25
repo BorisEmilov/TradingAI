@@ -63,6 +63,41 @@ def detect_liquidity_pools(df: pd.DataFrame, lookback: int = 100, tolerance_pct:
     return out
 
 
+def detect_liquidity_sweeps(df: pd.DataFrame, lookback: int = 100, tolerance_pct: float = 0.05) -> pd.DataFrame:
+    """Detecta barrido + rechazo de liquidez en la MISMA vela (sin look-ahead).
+
+    Un "liquidity sweep" real es: el precio perfora un nivel de equal-high/low
+    reciente con la mecha pero CIERRA de vuelta dentro del rango en la misma vela
+    (atrapa a quienes tenian stops ahi, luego revierte). Solo usa datos hasta la
+    vela actual -> valido para uso en vivo, a diferencia de una version que
+    esperase confirmacion en velas futuras.
+    """
+    out = df.copy()
+    n = len(out)
+    sweep_bearish = np.zeros(n, dtype=bool)  # barrio un equal-high y rechazo a la baja
+    sweep_bullish = np.zeros(n, dtype=bool)  # barrio un equal-low y rechazo al alza
+
+    high, low, close = out["high"].to_numpy(), out["low"].to_numpy(), out["close"].to_numpy()
+
+    for i in range(lookback, n):
+        window_high = high[i - lookback : i]
+        window_low = low[i - lookback : i]
+
+        recent_high = window_high.max()
+        recent_low = window_low.min()
+
+        # Perfora el maximo reciente con la mecha pero cierra por debajo -> rechazo bajista.
+        if high[i] > recent_high * (1 + tolerance_pct / 100) and close[i] < recent_high:
+            sweep_bearish[i] = True
+        # Perfora el minimo reciente con la mecha pero cierra por encima -> rechazo alcista.
+        if low[i] < recent_low * (1 - tolerance_pct / 100) and close[i] > recent_low:
+            sweep_bullish[i] = True
+
+    out["liquidity_sweep_bearish"] = sweep_bearish
+    out["liquidity_sweep_bullish"] = sweep_bullish
+    return out
+
+
 def premium_discount_zone(df: pd.DataFrame, lookback: int = 50) -> pd.DataFrame:
     """Ubica el precio dentro del rango [0,1] del swing reciente: <0.5 discount, >0.5 premium."""
     out = df.copy()

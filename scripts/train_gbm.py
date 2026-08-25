@@ -6,8 +6,15 @@ generaliza ya se hizo con walk-forward (scripts/baseline_gbm.py, ver memoria del
 proyecto: 20/20 folds positivos en 5 simbolos). El objetivo aqui es maximizar lo que
 el modelo de produccion aprende, no volver a validar.
 
+Entrena un ENSEMBLE de `--n-seeds` modelos con semillas distintas (mismos datos,
+misma arquitectura) y los guarda todos juntos -- `GBMPredictor` promedia sus
+probabilidades en inferencia. Reduce la varianza de "le toco una inicializacion
+buena/mala" que ya se vio con el transformer (mismo "mejor epoch" daba resultados
+muy distintos entre corridas por pura suerte de semilla, ver memoria del proyecto).
+
 Uso:
     python scripts/train_gbm.py --symbol EURUSD
+    python scripts/train_gbm.py --symbol EURUSD --n-seeds 5
 """
 
 from __future__ import annotations
@@ -40,7 +47,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--data-dir", default=None, help="Por defecto, paths.raw_data de config.yaml")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=42, help="Semilla base; el ensemble usa seed, seed+1, ... seed+n_seeds-1")
+    parser.add_argument("--n-seeds", type=int, default=5, help="Numero de modelos en el ensemble")
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -63,16 +71,23 @@ def main() -> None:
 
     feature_columns = select_feature_columns(features_by_tf["M15"])
     seq_len_by_tf = config["model"]["sequence_length"]
-    dataset = MultiTimeframeTradingDataset(features_by_tf, feature_columns, seq_len_by_tf)
+    dataset = MultiTimeframeTradingDataset(
+        features_by_tf, feature_columns, seq_len_by_tf,
+        tp_atr_mult=config["model"]["tp_atr_mult"], sl_atr_mult=config["model"]["sl_atr_mult"],
+    )
     logger.info(f"Dataset: {len(dataset)} ejemplos alineados en las 4 temporalidades")
 
     X = flatten_last_timestep(dataset.sequences)
     y = dataset.direction
     logger.info(f"X shape: {X.shape}, distribucion direction: {np.bincount(y, minlength=3).tolist()}")
 
-    model = HistGradientBoostingClassifier(random_state=args.seed, max_iter=200, early_stopping=True)
-    model.fit(X, y)
-    logger.info("Modelo entrenado sobre todo el historico disponible")
+    models = []
+    for i in range(args.n_seeds):
+        seed = args.seed + i
+        model = HistGradientBoostingClassifier(random_state=seed, max_iter=200, early_stopping=True)
+        model.fit(X, y)
+        models.append(model)
+        logger.info(f"Modelo {i + 1}/{args.n_seeds} entrenado (seed={seed})")
 
     # "secrets" (credenciales/URL del bridge) no hace falta para inferencia y no es un
     # tipo de datos puro (pydantic BaseSettings) — no se guarda en el checkpoint.
@@ -80,10 +95,10 @@ def main() -> None:
 
     out_path = Path(config["paths"]["models_dir"]) / f"{args.symbol}_gbm.joblib"
     joblib.dump(
-        {"model": model, "feature_columns": feature_columns, "config": config_without_secrets},
+        {"models": models, "feature_columns": feature_columns, "config": config_without_secrets},
         out_path,
     )
-    logger.info(f"Checkpoint guardado en {out_path}")
+    logger.info(f"Checkpoint guardado en {out_path} (ensemble de {len(models)} modelos)")
 
 
 if __name__ == "__main__":

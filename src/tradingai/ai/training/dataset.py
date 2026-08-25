@@ -93,7 +93,14 @@ class MultiTimeframeTradingDataset(Dataset):
         feature_columns: list[str],
         seq_len_by_tf: dict[str, int],
         horizon: int = 20,
+        tp_atr_mult: float = 2.0,
+        sl_atr_mult: float = 1.0,
     ) -> None:
+        # Guardado para que la validacion (walk-forward) pueda purgar correctamente
+        # los ejemplos cuya etiqueta mira hacia adelante mas alla del corte train/test
+        # (ver scripts/baseline_gbm.py::_purge_train_end) sin duplicar el numero aqui.
+        self.horizon = horizon
+
         aligned = align_and_build_sequences(features_by_tf, feature_columns, seq_len_by_tf)
         self.sequences = aligned.sequences  # {tf: (N, seq_len, n_features)}
         # Indice (en features_by_tf["M15"]) de cada ejemplo, en el mismo orden que el
@@ -101,7 +108,9 @@ class MultiTimeframeTradingDataset(Dataset):
         # (p.ej. para evaluar un backtest solo sobre el tramo de validacion).
         self.anchor_positions = aligned.anchor_positions
 
-        labels = triple_barrier_labels(features_by_tf["M15"], horizon=horizon)
+        labels = triple_barrier_labels(
+            features_by_tf["M15"], horizon=horizon, tp_atr_mult=tp_atr_mult, sl_atr_mult=sl_atr_mult
+        )
         idx = aligned.anchor_positions
         self.direction = labels["direction"][idx]
         self.entry_offset = labels["entry_offset"][idx]

@@ -88,34 +88,258 @@ def test_approves_when_drawdown_within_limit():
 
 
 def test_rejects_too_many_correlated_same_direction_positions():
+    # EURUSD LONG y GBPUSD LONG ya estan ambas "cortas de USD" -- una tercera senal
+    # que tambien quede corta de USD (aqui, otra LONG EURUSD) supera el limite de 2.
+    # max_positions_per_symbol=None para aislar esta regla de la de "1 por simbolo".
     open_positions = [
         {"symbol": "EURUSD", "type": "buy", "volume": 1.0, "profit": 0.0},
         {"symbol": "GBPUSD", "type": "buy", "volume": 1.0, "profit": 0.0},
     ]
     rm = RiskManager(
-        correlated_groups=[["EURUSD", "GBPUSD"]],
         max_correlated_same_direction=2,
+        max_positions_per_symbol=None,
         get_open_positions_count=lambda: 2,
         get_open_positions=lambda: open_positions,
         max_open_positions=10,
     )
-    # Una tercera posicion LONG en el mismo grupo (EURUSD/GBPUSD) supera el limite de 2.
     signal = _signal(1.1000, 1.0950, 1.1200, symbol="EURUSD", direction=Direction.LONG)
     assert not rm.approve(signal)
 
 
-def test_allows_uncorrelated_symbol_regardless_of_group_exposure():
+def test_rejects_cross_pair_sharing_currency_exposure():
+    # EURUSD LONG (+EUR/-USD) y GBPUSD LONG (+GBP/-USD) comparten exposicion a -USD.
+    # EURJPY LONG (+EUR/-JPY) no comparte simbolo con ninguna de las dos, pero SI
+    # comparte +EUR con EURUSD -- por si sola no basta para bloquear (1 < 2), pero
+    # demuestra que el modelo por divisa detecta correlacion entre cruces distintos
+    # sin necesitar una lista de grupos fija (gap real que tenia el modelo anterior
+    # de "grupos de simbolos exactos", expuesto al anadir pares cruzados el 2026-08-24).
     open_positions = [
         {"symbol": "EURUSD", "type": "buy", "volume": 1.0, "profit": 0.0},
-        {"symbol": "GBPUSD", "type": "buy", "volume": 1.0, "profit": 0.0},
+        {"symbol": "EURGBP", "type": "buy", "volume": 1.0, "profit": 0.0},
     ]
     rm = RiskManager(
-        correlated_groups=[["EURUSD", "GBPUSD"]],
         max_correlated_same_direction=2,
         get_open_positions_count=lambda: 2,
         get_open_positions=lambda: open_positions,
         max_open_positions=10,
     )
-    # XAUUSD no esta en el grupo EURUSD/GBPUSD -> sin restriccion de correlacion.
-    signal = _signal(1.1000, 1.0950, 1.1200, symbol="XAUUSD", direction=Direction.LONG)
+    # EURJPY LONG tambien queda +EUR -- junto a las 2 posiciones ya +EUR, supera el limite.
+    signal = _signal(1.1000, 1.0950, 1.1200, symbol="EURJPY", direction=Direction.LONG)
+    assert not rm.approve(signal)
+
+
+def test_allows_uncorrelated_symbol_regardless_of_existing_exposure():
+    open_positions = [
+        {"symbol": "EURUSD", "type": "buy", "volume": 1.0, "profit": 0.0},
+        {"symbol": "GBPUSD", "type": "buy", "volume": 1.0, "profit": 0.0},
+    ]
+    rm = RiskManager(
+        max_correlated_same_direction=2,
+        get_open_positions_count=lambda: 2,
+        get_open_positions=lambda: open_positions,
+        max_open_positions=10,
+    )
+    # AUDCAD no comparte ninguna divisa con EUR/GBP/USD -> sin restriccion de correlacion.
+    signal = _signal(1.1000, 1.0950, 1.1200, symbol="AUDCAD", direction=Direction.LONG)
+    assert rm.approve(signal)
+
+
+def test_index_symbol_has_no_currency_correlation():
+    # US500 (indice, 5 letras) no descompone en divisas -> nunca se bloquea por esta regla.
+    # max_positions_per_symbol=None para aislar esta regla de la de "1 por simbolo".
+    open_positions = [{"symbol": "US500", "type": "buy", "volume": 1.0, "profit": 0.0}] * 5
+    rm = RiskManager(
+        max_correlated_same_direction=2,
+        max_positions_per_symbol=None,
+        get_open_positions_count=lambda: 5,
+        get_open_positions=lambda: open_positions,
+        max_open_positions=10,
+    )
+    signal = TradingSignal(
+        symbol="US500", timeframe="M15", timestamp=datetime.now(timezone.utc),
+        direction=Direction.LONG, confidence=0.8, entry_price=100.0, stop_loss=95.0, take_profit=110.0,
+    )
+    assert rm.approve(signal)
+
+
+def test_rejects_sl_too_close_to_spread():
+    # Piloto en vivo del 2026-08-24: con ATR bajo el SL quedaba a veces a solo 3-5x el
+    # spread -- se activaba por ruido/spread en vez de por una reversion real.
+    # spread=0.00010, SL a 0.0005 de distancia -> solo 5x el spread, por debajo del piso de 10x.
+    rm = RiskManager(
+        min_sl_spread_multiple=10.0,
+        get_open_positions_count=lambda: 0,
+        get_spread=lambda symbol: 0.00010,
+    )
+    signal = _signal(1.1000, 1.0995, 1.1200)  # SL a 0.0005 (rr>=2.0, aprobado por lo demas)
+    assert not rm.approve(signal)
+
+
+def test_approves_sl_far_enough_from_spread():
+    rm = RiskManager(
+        min_sl_spread_multiple=10.0,
+        get_open_positions_count=lambda: 0,
+        get_spread=lambda symbol: 0.00010,
+    )
+    # SL a 0.0020 de distancia -> 20x el spread, por encima del piso de 10x.
+    signal = _signal(1.1000, 1.0980, 1.1400)
+    assert rm.approve(signal)
+
+
+def test_sl_spread_rule_disabled_by_default():
+    # Sin min_sl_spread_multiple configurado, la regla no bloquea nada (retrocompatible).
+    rm = RiskManager(get_open_positions_count=lambda: 0, get_spread=lambda symbol: 0.00010)
+    signal = _signal(1.1000, 1.0995, 1.1100)
+    assert rm.approve(signal)
+
+
+def test_rejects_second_position_on_same_symbol():
+    # Regresion del piloto en vivo del 2026-08-24: dos senales SHORT EURGBP casi al
+    # mismo precio se ejecutaron seguidas porque nada impedia una segunda posicion en
+    # el mismo simbolo -- duplico el riesgo real sobre ese movimiento de precio.
+    open_positions = [{"symbol": "EURGBP", "type": "sell", "volume": 3.2, "profit": 0.0}]
+    rm = RiskManager(
+        max_positions_per_symbol=1,
+        max_correlated_same_direction=None,
+        get_open_positions_count=lambda: 1,
+        get_open_positions=lambda: open_positions,
+        max_open_positions=10,
+    )
+    signal = _signal(0.8555, 0.8560, 0.8545, symbol="EURGBP", direction=Direction.SHORT)
+    assert not rm.approve(signal)
+
+
+def test_approves_second_position_when_symbol_limit_raised():
+    open_positions = [{"symbol": "EURGBP", "type": "sell", "volume": 3.2, "profit": 0.0}]
+    rm = RiskManager(
+        max_positions_per_symbol=2,
+        max_correlated_same_direction=None,
+        get_open_positions_count=lambda: 1,
+        get_open_positions=lambda: open_positions,
+        max_open_positions=10,
+    )
+    signal = _signal(0.8555, 0.8560, 0.8545, symbol="EURGBP", direction=Direction.SHORT)
+    assert rm.approve(signal)
+
+
+def test_positions_per_symbol_rule_disabled_when_none():
+    open_positions = [{"symbol": "EURGBP", "type": "sell", "volume": 3.2, "profit": 0.0}] * 5
+    rm = RiskManager(
+        max_positions_per_symbol=None,
+        max_correlated_same_direction=None,
+        get_open_positions_count=lambda: 5,
+        get_open_positions=lambda: open_positions,
+        max_open_positions=10,
+    )
+    signal = _signal(0.8555, 0.8560, 0.8545, symbol="EURGBP", direction=Direction.SHORT)
+    assert rm.approve(signal)
+
+
+def _open_position_with_sl(symbol="EURUSD", volume=1.0) -> dict:
+    return {"symbol": symbol, "type": "sell", "volume": volume, "profit": 0.0, "price_open": 1.1000, "sl": 1.1050}
+
+
+def test_rejects_when_portfolio_var_exceeds_limit():
+    # 2 posiciones ya arriesgan $2000 cada una (segun el mock de perdida real) = $4000.
+    # + $1000 de la señal nueva (1% de $100k) = $5000 agregado. Tope de 4% de $100k =
+    # $4000 -> $5000 supera el tope, se rechaza.
+    open_positions = [_open_position_with_sl(), _open_position_with_sl()]
+    rm = RiskManager(
+        risk_per_trade_pct=1.0,
+        max_positions_per_symbol=None,
+        max_correlated_same_direction=None,
+        max_portfolio_risk_pct=4.0,
+        get_open_positions_count=lambda: 2,
+        get_open_positions=lambda: open_positions,
+        get_account_equity=lambda: 100_000.0,
+        get_worst_case_loss=lambda *a: 2000.0,
+        max_open_positions=10,
+    )
+    signal = _signal(1.1000, 1.0950, 1.1200, symbol="GBPUSD", direction=Direction.LONG)
+    assert not rm.approve(signal)
+
+
+def test_approves_when_portfolio_var_within_limit():
+    # Mismo escenario, pero con un tope de 10% de $100k = $10000 -> $5000 esta debajo.
+    open_positions = [_open_position_with_sl(), _open_position_with_sl()]
+    rm = RiskManager(
+        risk_per_trade_pct=1.0,
+        max_positions_per_symbol=None,
+        max_correlated_same_direction=None,
+        max_portfolio_risk_pct=10.0,
+        get_open_positions_count=lambda: 2,
+        get_open_positions=lambda: open_positions,
+        get_account_equity=lambda: 100_000.0,
+        get_worst_case_loss=lambda *a: 2000.0,
+        max_open_positions=10,
+    )
+    signal = _signal(1.1000, 1.0950, 1.1200, symbol="GBPUSD", direction=Direction.LONG)
+    assert rm.approve(signal)
+
+
+def test_portfolio_var_ignores_positions_without_sl():
+    # Una posicion sin SL puesto (dato ausente) no puede acotarse -> se ignora en vez
+    # de reventar o bloquear todo por un dato faltante.
+    open_positions = [{"symbol": "EURUSD", "type": "sell", "volume": 1.0, "profit": 0.0, "price_open": None, "sl": None}]
+    rm = RiskManager(
+        risk_per_trade_pct=1.0,
+        max_positions_per_symbol=None,
+        max_correlated_same_direction=None,
+        max_portfolio_risk_pct=2.0,
+        get_open_positions_count=lambda: 1,
+        get_open_positions=lambda: open_positions,
+        get_account_equity=lambda: 100_000.0,
+        get_worst_case_loss=lambda *a: 2000.0,
+        max_open_positions=10,
+    )
+    signal = _signal(1.1000, 1.0950, 1.1200, symbol="GBPUSD", direction=Direction.LONG)
+    assert rm.approve(signal)  # solo cuenta el 1% ($1000) de la señal nueva, dentro del 2% ($2000)
+
+
+def test_rejects_signal_during_news_blackout():
+    nfp_time = datetime(2026, 9, 4, 12, 30, tzinfo=timezone.utc)  # NFP conocido (ver test_news_calendar.py)
+    rm = RiskManager(
+        max_positions_per_symbol=None,
+        max_correlated_same_direction=None,
+        news_calendar_config={"minutes_before": 15, "minutes_after": 15},
+        get_open_positions_count=lambda: 0,
+    )
+    signal = _signal(1.1000, 1.0950, 1.1200, timestamp=nfp_time)
+    assert not rm.approve(signal)
+
+
+def test_approves_signal_outside_news_blackout():
+    far_from_nfp = datetime(2026, 9, 4, 18, 0, tzinfo=timezone.utc)
+    rm = RiskManager(
+        max_positions_per_symbol=None,
+        max_correlated_same_direction=None,
+        news_calendar_config={"minutes_before": 15, "minutes_after": 15},
+        get_open_positions_count=lambda: 0,
+    )
+    signal = _signal(1.1000, 1.0950, 1.1200, timestamp=far_from_nfp)
+    assert rm.approve(signal)
+
+
+def test_news_calendar_disabled_by_default():
+    nfp_time = datetime(2026, 9, 4, 12, 30, tzinfo=timezone.utc)
+    rm = RiskManager(
+        max_positions_per_symbol=None,
+        max_correlated_same_direction=None,
+        get_open_positions_count=lambda: 0,
+    )
+    signal = _signal(1.1000, 1.0950, 1.1200, timestamp=nfp_time)
+    assert rm.approve(signal)
+
+
+def test_portfolio_var_disabled_by_default():
+    open_positions = [_open_position_with_sl()] * 10
+    rm = RiskManager(
+        max_positions_per_symbol=None,
+        max_correlated_same_direction=None,
+        get_open_positions_count=lambda: 10,
+        get_open_positions=lambda: open_positions,
+        get_worst_case_loss=lambda *a: 999999.0,
+        max_open_positions=20,
+    )
+    signal = _signal(1.1000, 1.0950, 1.1200, symbol="GBPUSD", direction=Direction.LONG)
     assert rm.approve(signal)

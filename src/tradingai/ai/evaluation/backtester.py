@@ -9,6 +9,7 @@ un backtest mas riguroso o a paper trading en MT5.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import pandas as pd
@@ -83,13 +84,47 @@ class Backtester:
 
 
 def summarize(trades: list[Trade]) -> dict:
+    """Win rate/pnl (ya existian) + metricas ajustadas a riesgo, no solo el retorno
+    bruto: un 55% de acierto con drawdowns brutales no es lo mismo que uno suave.
+
+    Sharpe/Sortino aqui son "por operacion" (no anualizados: anualizar exigiria
+    asumir una frecuencia de trading fija, que varia por simbolo/regimen) -- sirven
+    para comparar la CALIDAD del retorno entre folds/simbolos con la misma unidad,
+    no como un Sharpe de cartera clasico.
+    """
     if not trades:
         return {"n_trades": 0}
 
-    wins = [t for t in trades if t.pnl_pct > 0]
+    pnls = [t.pnl_pct for t in trades]
+    n = len(pnls)
+    wins = [p for p in pnls if p > 0]
+    mean_pnl = sum(pnls) / n
+
+    variance = sum((p - mean_pnl) ** 2 for p in pnls) / n
+    std_pnl = math.sqrt(variance)
+    sharpe = mean_pnl / std_pnl if std_pnl > 0 else 0.0
+
+    # Desviacion a la baja (semi-desviacion respecto a 0): solo penaliza la
+    # volatilidad de las perdidas, no la de las ganancias -- por eso Sortino no
+    # castiga a un sistema por tener operaciones muy ganadoras ocasionales.
+    downside_variance = sum(p**2 for p in pnls if p < 0) / n
+    downside_std = math.sqrt(downside_variance)
+    sortino = mean_pnl / downside_std if downside_std > 0 else 0.0
+
+    running = 0.0
+    peak = float("-inf")
+    max_drawdown = 0.0
+    for p in pnls:
+        running += p
+        peak = max(peak, running)
+        max_drawdown = max(max_drawdown, peak - running)
+
     return {
-        "n_trades": len(trades),
-        "win_rate": len(wins) / len(trades),
-        "avg_pnl_pct": sum(t.pnl_pct for t in trades) / len(trades),
-        "total_pnl_pct": sum(t.pnl_pct for t in trades),
+        "n_trades": n,
+        "win_rate": len(wins) / n,
+        "avg_pnl_pct": mean_pnl,
+        "total_pnl_pct": sum(pnls),
+        "sharpe": sharpe,
+        "sortino": sortino,
+        "max_drawdown_pct": max_drawdown,
     }

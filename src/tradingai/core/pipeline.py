@@ -57,7 +57,7 @@ class TradingPipeline:
             logger.info(f"[{symbol}] Senal rechazada por gestion de riesgo: {signal}")
             return signal
 
-        logger.info(f"[{symbol}] Ejecutando senal: {signal}")
+        logger.info(f"[{symbol}] ABIERTA: {signal}")
         self.executor.execute(signal)
         return signal
 

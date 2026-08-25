@@ -26,6 +26,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np  # noqa: E402
+import threadpoolctl  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from sklearn.ensemble import HistGradientBoostingClassifier  # noqa: E402
 from sklearn.metrics import classification_report, confusion_matrix  # noqa: E402
@@ -40,19 +41,12 @@ from tradingai.ai.training.dataset import MultiTimeframeTradingDataset  # noqa: 
 from tradingai.core.signal import Direction, TradingSignal  # noqa: E402
 from tradingai.utils.logging import setup_logging  # noqa: E402
 from tradingai.utils.seed import set_seed  # noqa: E402
+from tradingai.utils.thermal import wait_for_safe_temp  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
 DIRECTION_NAMES = {0: "neutral", 1: "long", 2: "short"}
 _DIRECTION_MAP = {0: Direction.NEUTRAL, 1: Direction.LONG, 2: Direction.SHORT}
-
-# Mismos multiplicadores fijos que usa el etiquetado por triple-barrera
-# (ai/training/dataset.py::triple_barrier_labels) para construir TP/SL reales a
-# partir de la direccion predicha, y poder correr el mismo Backtester que el
-# transformer para una comparacion directa de win_rate/pnl.
-TP_ATR_MULT = 2.0
-SL_ATR_MULT = 1.0
-
 
 def _pip_size(symbol: str) -> float:
     if symbol.upper().endswith("JPY") or symbol.upper() in {"XAUUSD", "XAGUSD"}:
@@ -69,6 +63,10 @@ def main() -> None:
     parser.add_argument("--backtest-step", type=int, default=20, help="Espaciado entre anchors para el backtest (evita operaciones solapadas); la accuracy de clasificacion usa todos los ejemplos igual")
     parser.add_argument("--data-dir", default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--n-seeds", type=int, default=5, help="Modelos del ensemble por fold (igual que train_gbm.py, para validar lo mismo que corre en produccion)")
+    parser.add_argument("--max-threads", type=int, default=1, help="Hilos maximos para sklearn/BLAS -- ver tradingai.utils.thermal, esta maquina se calienta rapido con mas de 1")
+    parser.add_argument("--max-temp-c", type=float, default=80.0, help="Pausa antes de entrenar si la CPU supera esta temperatura")
+    parser.add_argument("--fold-cooldown-seconds", type=float, default=20.0, help="Pausa fija entre folds para dar tiempo a disipar calor")
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -80,8 +78,14 @@ def main() -> None:
     features_by_tf = {tf: normalize_ohlcv(build_feature_pipeline(candles_by_tf[tf], config)) for tf in TIMEFRAMES}
     feature_columns = select_feature_columns(features_by_tf["M15"])
 
+    tp_atr_mult = config["model"]["tp_atr_mult"]
+    sl_atr_mult = config["model"]["sl_atr_mult"]
+
     seq_len_by_tf = config["model"]["sequence_length"]
-    dataset = MultiTimeframeTradingDataset(features_by_tf, feature_columns, seq_len_by_tf)
+    dataset = MultiTimeframeTradingDataset(
+        features_by_tf, feature_columns, seq_len_by_tf,
+        tp_atr_mult=tp_atr_mult, sl_atr_mult=sl_atr_mult,
+    )
     n = len(dataset)
     logger.info(f"[{args.symbol}] Dataset total: {n} ejemplos alineados")
 
@@ -100,16 +104,39 @@ def main() -> None:
         test_start, test_end = fold_bounds[fold], fold_bounds[fold + 1]
         internal_val_start = int(train_end * (1 - args.internal_val_split))
 
-        X_train, y_train = X[:internal_val_start], y[:internal_val_start]
+        # Purge (Lopez de Prado, "Advances in Financial Machine Learning"): la
+        # etiqueta de un ejemplo mira `dataset.horizon` velas hacia adelante -- un
+        # ejemplo justo antes de test_start cuya ventana de etiquetado ya toca datos
+        # de test_start en adelante seria una fuga de informacion. Se purga
+        # explicitamente (nunca se entrena sobre los ultimos `horizon` ejemplos antes
+        # de test_start), sin depender de que --internal-val-split deje un margen
+        # suficiente por casualidad (con split=0 no habria margen ninguno).
+        purged_train_end = min(internal_val_start, test_start - dataset.horizon)
+
+        X_train, y_train = X[:purged_train_end], y[:purged_train_end]
         X_test, y_test = X[test_start:test_end], y[test_start:test_end]
 
+        # Ensemble de N semillas por fold, igual que scripts/train_gbm.py -- asi el
+        # walk-forward valida lo mismo que efectivamente corre en produccion, no un
+        # modelo unico mas optimista/pesimista de lo que sera el ensemble real.
+        # threadpoolctl fuerza `--max-threads` hilos de forma fiable (las variables
+        # de entorno OMP_NUM_THREADS/etc. no siempre alcanzan a limitar sklearn/BLAS
+        # una vez el proceso ya arranco -- visto en vivo el 2026-08-25: la CPU llego
+        # a 100C en <15s con esas variables puestas). `wait_for_safe_temp` pausa
+        # antes de CADA modelo, no solo entre folds, para no dejar que el calor se
+        # acumule durante el ensemble entero.
         t0 = time.time()
-        model = HistGradientBoostingClassifier(random_state=args.seed, max_iter=200, early_stopping=True)
-        model.fit(X_train, y_train)
+        models = []
+        with threadpoolctl.threadpool_limits(limits=args.max_threads):
+            for i in range(args.n_seeds):
+                wait_for_safe_temp(max_temp_c=args.max_temp_c)
+                m = HistGradientBoostingClassifier(random_state=args.seed + i, max_iter=200, early_stopping=True)
+                m.fit(X_train, y_train)
+                models.append(m)
         train_time = time.time() - t0
 
-        y_pred = model.predict(X_test)
-        y_proba = model.predict_proba(X_test)
+        y_proba = np.mean([m.predict_proba(X_test) for m in models], axis=0)
+        y_pred = y_proba.argmax(axis=1)
         accuracy = (y_pred == y_test).mean()
 
         majority_class = np.bincount(y_train, minlength=3).argmax()
@@ -142,8 +169,8 @@ def main() -> None:
             take_profit = stop_loss = None
             if direction != Direction.NEUTRAL and atr > 0:
                 sign = 1 if direction == Direction.LONG else -1
-                take_profit = entry_price + sign * TP_ATR_MULT * atr
-                stop_loss = entry_price - sign * SL_ATR_MULT * atr
+                take_profit = entry_price + sign * tp_atr_mult * atr
+                stop_loss = entry_price - sign * sl_atr_mult * atr
 
             signals.append(
                 (
@@ -163,7 +190,7 @@ def main() -> None:
 
         backtest_cfg = config.get("backtest", {})
         backtester = Backtester(
-            confidence_threshold=0.0,
+            confidence_threshold=args.confidence_threshold,
             max_holding_bars=backtest_cfg.get("max_holding_bars", 50),
             spread_pips=backtest_cfg.get("spread_pips", 1.0),
             slippage_pips=backtest_cfg.get("slippage_pips", 0.2),
@@ -174,7 +201,7 @@ def main() -> None:
         trade_stats = summarize(trades)
 
         logger.info(
-            f"=== Fold {fold}/{args.n_folds - 1} === train={internal_val_start} test={test_end - test_start} "
+            f"=== Fold {fold}/{args.n_folds - 1} === train={purged_train_end} test={test_end - test_start} "
             f"({train_time:.1f}s)"
         )
         logger.info(
@@ -192,8 +219,16 @@ def main() -> None:
                 f"Fold {fold} BACKTEST (comparable a walk_forward.py): {trade_stats['n_trades']} operaciones, "
                 f"win_rate={trade_stats['win_rate'] * 100:.1f}%, pnl={trade_stats['total_pnl_pct'] * 100:.2f}%"
             )
+            logger.info(
+                f"Fold {fold} riesgo: sharpe={trade_stats['sharpe']:.3f}, sortino={trade_stats['sortino']:.3f}, "
+                f"max_drawdown={trade_stats['max_drawdown_pct'] * 100:.2f}%"
+            )
         else:
             logger.info(f"Fold {fold} BACKTEST: 0 operaciones")
+
+        if args.fold_cooldown_seconds > 0 and fold < args.n_folds - 1:
+            logger.info(f"Pausa de {args.fold_cooldown_seconds:.0f}s entre folds para disipar calor")
+            time.sleep(args.fold_cooldown_seconds)
 
     logger.info("=== Resumen linea base (gradient boosting) ===")
     for i, (acc, maj) in enumerate(zip(fold_accuracies, fold_majority_accuracies), start=1):

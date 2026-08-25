@@ -64,7 +64,10 @@ def _validation_start_index(
     features_by_tf = {
         tf: normalize_ohlcv(build_feature_pipeline(candles_by_tf[tf], config)) for tf in TIMEFRAMES
     }
-    dataset = MultiTimeframeTradingDataset(features_by_tf, feature_columns, seq_len_by_tf)
+    dataset = MultiTimeframeTradingDataset(
+        features_by_tf, feature_columns, seq_len_by_tf,
+        tp_atr_mult=config["model"]["tp_atr_mult"], sl_atr_mult=config["model"]["sl_atr_mult"],
+    )
     split_idx = int(len(dataset) * (1 - val_split))
 
     val_start_ts = features_by_tf["M15"]["timestamp"].iloc[dataset.anchor_positions[split_idx]]

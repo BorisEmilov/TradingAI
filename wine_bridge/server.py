@@ -62,6 +62,25 @@ def _order_filling_type(symbol: str) -> int:
     return mt5.ORDER_FILLING_RETURN
 
 
+_selected_symbols: set[str] = set()
+
+
+def _ensure_selected(symbol: str) -> None:
+    """Anade el simbolo a Market Watch si no lo esta ya.
+
+    MT5 no da ticks/permite operar un simbolo que no esta "seleccionado" (visible en
+    Market Watch) aunque `symbol_info()` lo encuentre igual -- visto en vivo el
+    2026-08-24 al anadir pares cruzados (EURCAD, EURGBP, EURJPY, etc.): existian
+    (`trade_mode=4`, trading completo permitido) pero `select=False` hacia que
+    `symbol_info_tick()` devolviera None. Cacheado en memoria del proceso para no
+    llamar a `symbol_select` en cada request.
+    """
+    if symbol in _selected_symbols:
+        return
+    mt5.symbol_select(symbol, True)
+    _selected_symbols.add(symbol)
+
+
 def _build_order_request(body: dict) -> dict:
     order_type = mt5.ORDER_TYPE_BUY if body["type"] == "buy" else mt5.ORDER_TYPE_SELL
     request = {
@@ -81,6 +100,48 @@ def _build_order_request(body: dict) -> dict:
     if body.get("tp") is not None:
         request["tp"] = body["tp"]
     return request
+
+
+def _build_close_request(position, volume: float, deviation: int) -> dict:
+    """Cierra una posicion existente referenciando su ticket via el campo `position`.
+
+    La cuenta opera en modo hedging (ACCOUNT_MARGIN_MODE_RETAIL_HEDGING): una orden
+    opuesta simple NO cierra la posicion, abre una nueva en sentido contrario. Hay que
+    poner `position=<ticket>` explicitamente para que MT5 la trate como cierre.
+    """
+    closing_type = mt5.ORDER_TYPE_SELL if position.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+    tick = mt5.symbol_info_tick(position.symbol)
+    price = tick.bid if position.type == mt5.POSITION_TYPE_BUY else tick.ask
+    return {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": position.symbol,
+        "volume": volume,
+        "type": closing_type,
+        "position": position.ticket,
+        "price": price,
+        "deviation": deviation,
+        "magic": position.magic,
+        "comment": "cierre via API",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": _order_filling_type(position.symbol),
+    }
+
+
+def _build_modify_sltp_request(position, sl: float | None, tp: float | None) -> dict:
+    """Mueve el SL/TP de una posicion ya abierta sin cerrarla (TRADE_ACTION_SLTP).
+
+    A diferencia de `_build_order_request`/`_build_close_request`, esta accion no
+    manda ninguna orden nueva -- solo actualiza los niveles de la posicion existente.
+    Si `sl`/`tp` vienen en None se conserva el valor que ya tenia la posicion (MT5
+    exige mandar ambos campos, no solo el que cambia).
+    """
+    return {
+        "action": mt5.TRADE_ACTION_SLTP,
+        "symbol": position.symbol,
+        "position": position.ticket,
+        "sl": sl if sl is not None else position.sl,
+        "tp": tp if tp is not None else position.tp,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -113,27 +174,80 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "positions": [
                             {
+                                "ticket": p.ticket,
                                 "symbol": p.symbol,
                                 # POSITION_TYPE_BUY=0, POSITION_TYPE_SELL=1
                                 "type": "buy" if p.type == mt5.POSITION_TYPE_BUY else "sell",
                                 "volume": p.volume,
                                 "profit": p.profit,
+                                "price_open": p.price_open,
+                                "sl": p.sl,
+                                "tp": p.tp,
                             }
                             for p in (positions or [])
                         ]
                     }
                 )
 
+            elif parsed.path == "/history_deals":
+                ticket = int(qs["ticket"][0])
+                deals = mt5.history_deals_get(position=ticket)
+                self._send_json(
+                    {
+                        "deals": [
+                            {
+                                "ticket": d.ticket,
+                                "time": int(d.time),
+                                "type": "buy" if d.type == mt5.DEAL_TYPE_BUY else "sell",
+                                "entry": int(d.entry),  # 0=apertura (IN), 1=cierre (OUT)
+                                "price": d.price,
+                                "profit": d.profit,
+                                "volume": d.volume,
+                            }
+                            for d in (deals or [])
+                        ]
+                    }
+                )
+
             elif parsed.path == "/symbol_info":
+                _ensure_selected(qs["symbol"][0])
                 info = mt5.symbol_info(qs["symbol"][0])
                 self._send_json(info._asdict() if info else None)
 
+            elif parsed.path == "/order_calc_profit":
+                _ensure_selected(qs["symbol"][0])
+                order_type = mt5.ORDER_TYPE_BUY if qs["type"][0] == "buy" else mt5.ORDER_TYPE_SELL
+                profit = mt5.order_calc_profit(
+                    order_type,
+                    qs["symbol"][0],
+                    float(qs["volume"][0]),
+                    float(qs["price_open"][0]),
+                    float(qs["price_close"][0]),
+                )
+                if profit is None:
+                    self._send_json({"error": str(mt5.last_error())}, status=502)
+                else:
+                    self._send_json({"profit": profit})
+
+            elif parsed.path == "/order_calc_margin":
+                _ensure_selected(qs["symbol"][0])
+                order_type = mt5.ORDER_TYPE_BUY if qs["type"][0] == "buy" else mt5.ORDER_TYPE_SELL
+                margin = mt5.order_calc_margin(
+                    order_type, qs["symbol"][0], float(qs["volume"][0]), float(qs["price"][0])
+                )
+                if margin is None:
+                    self._send_json({"error": str(mt5.last_error())}, status=502)
+                else:
+                    self._send_json({"margin": margin})
+
             elif parsed.path == "/symbol_tick":
+                _ensure_selected(qs["symbol"][0])
                 tick = mt5.symbol_info_tick(qs["symbol"][0])
                 self._send_json(tick._asdict() if tick else None)
 
             elif parsed.path == "/candles":
                 symbol = qs["symbol"][0]
+                _ensure_selected(symbol)
                 timeframe = qs["timeframe"][0]
                 n = int(qs.get("n", ["500"])[0])
                 mt5_timeframe = TIMEFRAME_MAP.get(timeframe)
@@ -172,8 +286,32 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if parsed.path == "/order":
+                _ensure_selected(body["symbol"])
                 result = mt5.order_send(_build_order_request(body))
                 self._send_json(result._asdict() if result else {"error": str(mt5.last_error())})
+
+            elif parsed.path == "/positions/close":
+                ticket = body["ticket"]
+                positions = mt5.positions_get(ticket=ticket)
+                if not positions:
+                    self._send_json({"error": f"no existe una posicion abierta con ticket {ticket}"}, status=404)
+                    return
+                position = positions[0]
+                volume = body.get("volume", position.volume)
+                deviation = body.get("deviation", 10)
+                result = mt5.order_send(_build_close_request(position, volume, deviation))
+                self._send_json(result._asdict() if result else {"error": str(mt5.last_error())})
+
+            elif parsed.path == "/positions/modify":
+                ticket = body["ticket"]
+                positions = mt5.positions_get(ticket=ticket)
+                if not positions:
+                    self._send_json({"error": f"no existe una posicion abierta con ticket {ticket}"}, status=404)
+                    return
+                position = positions[0]
+                result = mt5.order_send(_build_modify_sltp_request(position, body.get("sl"), body.get("tp")))
+                self._send_json(result._asdict() if result else {"error": str(mt5.last_error())})
+
             else:
                 self._send_json({"error": "not found"}, status=404)
         except Exception as exc:  # noqa: BLE001

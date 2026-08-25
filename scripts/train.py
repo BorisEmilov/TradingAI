@@ -64,7 +64,10 @@ def _build_dataset_for_symbol(
             raise RuntimeError(f"[{symbol}] Columnas de features inconsistentes en {tf}: faltan {missing}")
 
     seq_len_by_tf = config["model"]["sequence_length"]
-    dataset = MultiTimeframeTradingDataset(features_by_tf, feature_columns, seq_len_by_tf)
+    dataset = MultiTimeframeTradingDataset(
+        features_by_tf, feature_columns, seq_len_by_tf,
+        tp_atr_mult=config["model"]["tp_atr_mult"], sl_atr_mult=config["model"]["sl_atr_mult"],
+    )
     logger.info(f"[{symbol}] Dataset: {len(dataset)} ejemplos alineados en las 4 temporalidades")
     return dataset, feature_columns
 

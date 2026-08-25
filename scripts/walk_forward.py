@@ -70,7 +70,10 @@ def main() -> None:
     feature_columns = select_feature_columns(features_by_tf["M15"])
 
     seq_len_by_tf = config["model"]["sequence_length"]
-    dataset = MultiTimeframeTradingDataset(features_by_tf, feature_columns, seq_len_by_tf)
+    dataset = MultiTimeframeTradingDataset(
+        features_by_tf, feature_columns, seq_len_by_tf,
+        tp_atr_mult=config["model"]["tp_atr_mult"], sl_atr_mult=config["model"]["sl_atr_mult"],
+    )
     n = len(dataset)
     logger.info(f"[{args.symbol}] Dataset total: {n} ejemplos alineados")
 
@@ -85,9 +88,13 @@ def main() -> None:
 
     results = []
     for fold in range(1, args.n_folds):
-        train_end = fold_bounds[fold]
         test_start_ds_idx = fold_bounds[fold]
         test_end_ds_idx = fold_bounds[fold + 1]
+        # Purge (Lopez de Prado): la etiqueta de un ejemplo mira `dataset.horizon`
+        # velas hacia adelante -- el val_interno, al ser contiguo con test_start, es
+        # el que puede filtrar informacion de test si no se recorta antes. Nunca se
+        # entrena/valida sobre los ultimos `horizon` ejemplos antes de test_start.
+        train_end = test_start_ds_idx - dataset.horizon
         internal_val_start = int(train_end * (1 - args.internal_val_split))
 
         train_subset = Subset(dataset, range(0, internal_val_start))

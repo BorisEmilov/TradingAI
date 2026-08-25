@@ -2,9 +2,18 @@
 
 trading:
   mode: paper                 # paper | live
-  symbols: ["EURUSD", "GBPUSD", "XAUUSD", "USDJPY", "US500"]
+  symbols: [
+    "EURUSD", "GBPUSD", "USDJPY", "US500",
+    "EURCAD", "EURAUD", "USDCAD", "AUDUSD", "GBPAUD", "GBPCAD",
+    "EURGBP", "EURJPY", "GBPJPY", "USDCHF", "NZDUSD",
+  ]
+  # XAUUSD (oro) sacado del piloto el 2026-08-25 por decision explicita del usuario
+  # tras un SL de -$960.21 -- el oro se mueve con una volatilidad/tamaño de punto muy
+  # distinto al resto de pares FX, y el usuario prefirio no seguir operandolo por
+  # ahora. Volver a incluirlo en la lista de arriba si se decide retomarlo.
   risk_per_trade_pct: 1.0
   max_open_positions: 3
+  max_margin_pct_per_trade: 10.0  # tope de margen por operacion (independiente del sizing por riesgo)
   max_daily_drawdown_pct: 5.0
   min_risk_reward_ratio: 2.0   # piso duro: la IA puede pedir mas, nunca menos (ver RiskManager)
 
@@ -12,14 +21,61 @@ trading:
   # horas mas ilíquidas de la sesion asiatica en solitario). null = sin restriccion.
   trading_hours_utc: [7, 21]
 
-  # Simbolos que se mueven juntos: evita acumular exposicion direccional duplicada
-  # (ej. LONG EURUSD + LONG GBPUSD al mismo tiempo es casi la misma apuesta contra USD).
-  correlated_groups:
-    - ["EURUSD", "GBPUSD"]
-    - ["USDJPY"]
-    - ["XAUUSD"]
-    - ["US500"]
+  # Limite de posiciones abiertas que comparten exposicion a la MISMA divisa en la
+  # MISMA direccion -- derivado automaticamente del nombre de cada simbolo
+  # (RiskManager._currency_exposures), no de una lista fija de grupos. Ej. LONG
+  # EURUSD + LONG EURJPY + LONG EURGBP son 3 apuestas alcistas sobre EUR aunque sean
+  # 3 simbolos distintos sin ningun par literal repetido -- una lista de grupos fija
+  # no detectaria esto (gap real expuesto al anadir pares cruzados el 2026-08-24).
   max_correlated_same_direction: 2
+
+  # Tope de posiciones abiertas en el MISMO simbolo (sin importar direccion). Anadido
+  # el 2026-08-24: el piloto abrio 2 SHORT EURGBP casi al mismo precio en ciclos
+  # consecutivos porque nada lo impedia -- duplica el riesgo real sobre ese
+  # movimiento de precio especifico. null = sin limite (permite piramidar).
+  max_positions_per_symbol: 1
+
+  # VaR simplificado de portafolio: tope de perdida agregada (% del balance) si
+  # TODAS las posiciones abiertas + la señal nueva tocaran su stop loss a la vez.
+  # Los limites de arriba acotan riesgo por operacion/simbolo/divisa, pero ninguno
+  # responde a "cuanto podria perder la cuenta si el peor escenario le pega a los
+  # 16 simbolos combinados". null = sin limite.
+  max_portfolio_risk_pct: 10.0
+
+  # Filtro de calendario economico: pausa el trading alrededor de eventos de alto
+  # impacto (NFP, FOMC, CPI). NFP se calcula solo (primer viernes de mes, 8:30 ET,
+  # ajustado a horario de verano/invierno). FOMC/CPI NO siguen una regla fija --
+  # anadir aqui las fechas reales segun se publiquen (federalreserve.gov para FOMC,
+  # bls.gov para CPI). Lista vacia = esos dos eventos no se bloquean todavia.
+  news_calendar:
+    enabled: true
+    minutes_before: 15
+    minutes_after: 15
+    nfp:
+      enabled: true
+      time_et: "08:30"
+    manual_events: []
+      # - {date: "2026-MM-DD", time_utc: "HH:MM", label: "FOMC"}
+      # - {date: "2026-MM-DD", time_utc: "HH:MM", label: "CPI"}
+
+  # Distancia minima del SL respecto al spread actual, en veces el spread (bid-ask).
+  # Anadido el 2026-08-24 tras el piloto en vivo: con ATR bajo, el SL calculado podia
+  # quedar a solo 3-5x el spread -- demasiado cerca, se activaba por ruido/spread en
+  # vez de por una reversion real del precio. Rechaza la señal si no se cumple.
+  min_sl_spread_multiple: 5.0
+
+  # Trailing stop basado en estructura (2026-08-25): una vez que la operacion lleva
+  # `activate_at_r_multiple` veces su riesgo inicial en beneficio, mueve el SL a la
+  # ultima zona clave de estructura (swing high/low confirmado) a favor del precio,
+  # nunca al reves -- ver tradingai.mt5.trailing_stop. NO es un trailing por distancia
+  # fija/ATR: el usuario pidio explicitamente que el ajuste tenga sentido tecnico, no
+  # que se mueva de forma aleatoria.
+  trailing_stop:
+    enabled: true
+    activate_at_r_multiple: 1.0
+    swing_left: 3
+    swing_right: 3
+    swing_lookback_candles: 100
 
 backtest:
   # Costes de ida y vuelta por operacion (ver Backtester). Valores por defecto tipicos
@@ -34,17 +90,40 @@ features:
     enabled: true
     swing_lookback: 5           # velas a cada lado para detectar swing highs/lows
     ob_lookback: 50             # ventana para buscar order blocks
-    liquidity_lookback: 100     # ventana para equal highs/lows (liquidity pools)
+    liquidity_lookback: 100     # ventana para equal highs/lows (liquidity pools) y sweeps
+    liquidity_sweep_tolerance_pct: 0.05   # tolerancia al comparar el wick contra el nivel
   fvg:
     enabled: true
     min_gap_size_pips: 2.0
+    detect_inverted: true        # FVG invalidado (precio lo atraviesa) -> zona volteada
+  sessions:
+    enabled: true
+    # Ventanas horarias UTC (ICT killzones). Solapamiento Londres/NY definido por
+    # session_london ∩ session_ny; is_killzone marca las sub-ventanas de mayor probabilidad.
+    asia_utc: [0, 7]
+    london_utc: [7, 16]
+    ny_utc: [12, 21]
+    london_killzone_utc: [7, 10]
+    ny_killzone_utc: [12, 15]
   volume_profile:
     enabled: true
-    bins: 50
+    bins: 20                    # bins del histograma rolling (features por vela)
+    rolling_window: 200         # ventana movil para POC/Value Area por vela (~2 dias en M15)
     value_area_pct: 70          # % de volumen que define la "value area"
+  vwap:
+    enabled: true                # VWAP anclado a sesion (reset diario 00:00 UTC) + bandas std
+  wyckoff:
+    enabled: true
+    range_window: 20             # velas que definen el rango de trading de referencia
+    tolerance_pct: 0.05          # tolerancia al comparar el wick contra el limite del rango
+  elliott:
+    enabled: true
+    deviation_pct: 0.5           # % minimo de movimiento para confirmar un pivote del zigzag
+  divergence:
+    enabled: true                # divergencias precio vs RSI en swing highs/lows
   indicators:
     enabled: true
-    include: ["ema", "rsi", "atr", "macd", "bollinger"]
+    include: ["ema", "rsi", "atr", "macd", "bollinger", "adx"]
 
 model:
   # Analisis top-down multi-temporalidad: bias en D1 -> estructura en H1 -> entrada
@@ -69,6 +148,17 @@ model:
   epochs: 100
   early_stopping_patience: 20
 
+  # Multiplicadores de ATR para TP/SL, usados tanto en el etiquetado (triple barrera,
+  # ver ai/training/dataset.py) como en la ejecucion real (ai/inference/gbm_predictor.py)
+  # -- deben coincidir siempre entre si (ver docstring de triple_barrier_labels), y con
+  # el walk-forward que valida el edge. Ratio 2:1 (piso duro de RiskManager).
+  # Subido de 1.0/2.0 a 2.0/4.0 el 2026-08-24: con SL=1xATR el stop quedaba a veces a
+  # solo 5-6 pips en EURUSD/GBPUSD (muy cerca del spread), lo que en el piloto en vivo
+  # produjo varios stopouts por ruido/spread en vez de por reversion real. Duplicar
+  # ambos mantiene el ratio 2:1 pero da paradas mas propias de day-trading.
+  sl_atr_mult: 2.0
+  tp_atr_mult: 4.0
+
   # Cabezas de prediccion del modelo
   outputs:
     direction: ["long", "short", "neutral"]
@@ -76,7 +166,10 @@ model:
     predict_tp: true
     predict_sl: true
     entry_timeframe: ["M15", "M5"]   # en cual ejecutar la entrada
-    confidence_threshold: 0.6         # confianza minima para generar una senal operable
+    # Subido de 0.6 a 0.75 el 2026-08-24: el piloto en vivo operaba con demasiada
+    # frecuencia (varias señales por ciclo en varios simbolos); un umbral mas alto
+    # filtra las señales de conviccion mas baja sin ser tan restrictivo que no opere.
+    confidence_threshold: 0.75
 
 paths:
   raw_data: data/raw

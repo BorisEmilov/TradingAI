@@ -94,15 +94,75 @@ class MT5Connector:
             raise RuntimeError("No se pudo obtener info de cuenta desde el bridge.")
         return info
 
+    def calc_profit(self, symbol: str, order_type: str, volume: float, price_open: float, price_close: float) -> float:
+        """Profit/perdida exacto que MT5 calcularia para ese movimiento de precio.
+
+        Evita reconstruir a mano la conversion $/lote de cada instrumento (que difiere
+        entre forex, CFD e indices -- ver el bug real de XAUUSD del 2026-08-24, donde
+        `trade_tick_value/trade_tick_size` no representaba el $ real por punto para un
+        simbolo en modo CFD, dando lotes 10x mas grandes de lo debido).
+        """
+        self._require_connected()
+        data = self._get(
+            "/order_calc_profit", symbol=symbol, type=order_type, volume=volume,
+            price_open=price_open, price_close=price_close,
+        )
+        if "error" in data:
+            raise RuntimeError(f"No se pudo calcular el profit para {symbol}: {data['error']}")
+        return data["profit"]
+
+    def calc_margin(self, symbol: str, order_type: str, volume: float, price: float) -> float:
+        """Margen exacto que MT5 exigiria para esta orden (respeta convenciones propias
+        del instrumento: contract size, leverage, tipo de margen forex vs CFD/indice)."""
+        self._require_connected()
+        data = self._get("/order_calc_margin", symbol=symbol, type=order_type, volume=volume, price=price)
+        if "error" in data:
+            raise RuntimeError(f"No se pudo calcular el margen para {symbol}: {data['error']}")
+        return data["margin"]
+
     def get_open_positions_count(self) -> int:
         self._require_connected()
         return self._get("/positions/count")["count"]
 
     def get_open_positions(self) -> list[dict]:
-        """Cada posicion: {"symbol": str, "type": "buy"|"sell", "volume": float, "profit": float}."""
+        """Cada posicion: {"ticket": int, "symbol": str, "type": "buy"|"sell", "volume": float,
+        "profit": float, "price_open": float, "sl": float, "tp": float}."""
         self._require_connected()
         return self._get("/positions")["positions"]
 
     def send_order(self, order_request: dict) -> dict:
         self._require_connected()
         return self._post("/order", order_request)
+
+    def get_position_history(self, ticket: int) -> list[dict]:
+        """Deals asociados a una posicion (apertura + cierre), para reportar el
+        resultado real cuando el broker cierra por SL/TP sin que el codigo lo pida."""
+        self._require_connected()
+        return self._get("/history_deals", ticket=ticket)["deals"]
+
+    def modify_position_sl(self, ticket: int, sl: float, tp: float | None = None) -> dict:
+        """Mueve el SL (y opcionalmente el TP) de una posicion abierta sin cerrarla.
+
+        Usado por el trailing stop basado en estructura (ver mt5.trailing_stop): a
+        diferencia de `send_order`/`close_position`, no abre ni cierra nada, solo
+        actualiza los niveles de una posicion existente.
+        """
+        self._require_connected()
+        payload: dict = {"ticket": ticket, "sl": sl}
+        if tp is not None:
+            payload["tp"] = tp
+        return self._post("/positions/modify", payload)
+
+    def close_position(self, ticket: int, volume: float | None = None) -> dict:
+        """Cierra una posicion abierta por su ticket (ver `get_open_positions`).
+
+        `volume=None` cierra la posicion completa; un valor menor hace un cierre
+        parcial. La cuenta opera en modo hedging, asi que una orden opuesta simple NO
+        cierra la posicion (abriria una nueva en sentido contrario) -- el bridge
+        referencia el ticket explicitamente via el campo `position` de MT5.
+        """
+        self._require_connected()
+        payload = {"ticket": ticket}
+        if volume is not None:
+            payload["volume"] = volume
+        return self._post("/positions/close", payload)
