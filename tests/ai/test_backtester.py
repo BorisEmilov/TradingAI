@@ -4,7 +4,14 @@ from datetime import datetime, timezone
 import pandas as pd
 import pytest
 
-from tradingai.ai.evaluation.backtester import Backtester, Trade, summarize
+from tradingai.ai.evaluation.backtester import (
+    Backtester,
+    Trade,
+    default_spread_pips,
+    pip_size,
+    resolve_spread_pips,
+    summarize,
+)
 from tradingai.core.signal import Direction, TradingSignal
 
 
@@ -67,8 +74,8 @@ def test_costs_can_flip_a_marginal_win_into_a_loss():
     assert trade_with_costs.pnl_pct < 0
 
 
-def _trade_with_pnl(pnl_pct: float) -> Trade:
-    return Trade(signal=_long_signal(1.1000, 1.0950, 1.1100), exit_price=1.1000, exit_reason="tp", pnl_pct=pnl_pct)
+def _trade_with_pnl(pnl_pct: float, entry: float = 1.1000, sl: float = 1.0950) -> Trade:
+    return Trade(signal=_long_signal(entry, sl, 1.1100), exit_price=entry, exit_reason="tp", pnl_pct=pnl_pct)
 
 
 def test_summarize_computes_risk_adjusted_metrics():
@@ -86,6 +93,11 @@ def test_summarize_computes_risk_adjusted_metrics():
     assert stats["sharpe"] == pytest.approx(0.3234983196103152)
     assert stats["sortino"] == pytest.approx(0.6)
     assert stats["max_drawdown_pct"] == pytest.approx(0.02)
+    # risk_pct = (1.1000-1.0950)/1.1000 = 0.00454545... para las 5 (mismo signal) ->
+    # expectancy_r = avg_pnl_pct / risk_pct = 0.006 / 0.00454545... = 1.32
+    assert stats["expectancy_r"] == pytest.approx(1.32)
+    # gross_profit=0.06 (0.02+0.03+0.01), gross_loss=0.03 (0.01+0.02) -> 2.0
+    assert stats["profit_factor"] == pytest.approx(2.0)
 
 
 def test_summarize_handles_no_losses_without_division_by_zero():
@@ -93,7 +105,62 @@ def test_summarize_handles_no_losses_without_division_by_zero():
     stats = summarize(trades)
     assert stats["sortino"] == 0.0  # sin perdidas -> downside_std=0, se evita division por cero
     assert stats["max_drawdown_pct"] == 0.0  # nunca cae por debajo del pico
+    assert stats["profit_factor"] == float("inf")  # sin perdidas -> profit factor "perfecto"
+
+
+def test_summarize_profit_factor_zero_when_no_wins_and_no_losses():
+    stats = summarize([_trade_with_pnl(0.0)])
+    assert stats["profit_factor"] == 0.0
+
+
+def test_summarize_expectancy_r_normalizes_by_each_trade_own_risk():
+    # Misma pnl_pct (0.01) pero con distinta distancia de SL -> distinto R arriesgado:
+    # trade A arriesga 0.05 (risk_pct~0.0455), trade B arriesga 0.10 (risk_pct~0.0909).
+    # El pnl_pct crudo promedio seria igual (0.01) pero en R son muy distintos.
+    trade_a = _trade_with_pnl(0.01, entry=1.1000, sl=1.0950)
+    trade_b = _trade_with_pnl(0.01, entry=1.1000, sl=1.0900)
+
+    stats = summarize([trade_a, trade_b])
+
+    risk_a = (1.1000 - 1.0950) / 1.1000
+    risk_b = (1.1000 - 1.0900) / 1.1000
+    expected = ((0.01 / risk_a) + (0.01 / risk_b)) / 2
+    assert stats["expectancy_r"] == pytest.approx(expected)
+    assert stats["avg_pnl_pct"] == pytest.approx(0.01)  # el crudo no distingue el riesgo
 
 
 def test_summarize_empty_trades():
     assert summarize([]) == {"n_trades": 0}
+
+
+def test_pip_size_forex_default():
+    assert pip_size("EURUSD") == 0.0001
+
+
+def test_pip_size_jpy_pairs():
+    assert pip_size("USDJPY") == 0.01
+    assert pip_size("GBPJPY") == 0.01
+
+
+def test_pip_size_index_uses_point_not_forex_pip():
+    # Bug real del 2026-08-26: US500 cotiza con point=0.01 en MT5, no 0.00001 como
+    # un par forex -- usar el pip de forex ahi era un error de 2 ordenes de magnitud.
+    assert pip_size("US500") == 0.01
+
+
+def test_default_spread_pips_majors_vs_crosses():
+    assert default_spread_pips("EURUSD") == 1.0
+    assert default_spread_pips("USDCAD") == 1.0
+    assert default_spread_pips("EURAUD") == 2.0
+    assert default_spread_pips("GBPCAD") == 2.0
+
+
+def test_resolve_spread_pips_prefers_measured_value_over_default():
+    cfg = {"spread_pips_by_symbol": {"EURAUD": 3.2}}
+    assert resolve_spread_pips(cfg, "EURAUD") == 3.2
+    assert resolve_spread_pips(cfg, "EURUSD") == default_spread_pips("EURUSD")
+
+
+def test_resolve_spread_pips_falls_back_to_default_when_map_empty():
+    assert resolve_spread_pips({}, "GBPAUD") == default_spread_pips("GBPAUD")
+    assert resolve_spread_pips({"spread_pips_by_symbol": {}}, "GBPAUD") == default_spread_pips("GBPAUD")

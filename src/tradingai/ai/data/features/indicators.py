@@ -65,9 +65,30 @@ def add_indicators(df: pd.DataFrame, include: list[str] | None = None) -> pd.Dat
     close = out["close"]
 
     if "ema" in include:
-        out["ema_20_pct"] = _pct_of_close(_safe_series(ta.ema(close, length=20), out.index), close)
-        out["ema_50_pct"] = _pct_of_close(_safe_series(ta.ema(close, length=50), out.index), close)
-        out["ema_200_pct"] = _pct_of_close(_safe_series(ta.ema(close, length=200), out.index), close)
+        ema_20_pct = _pct_of_close(_safe_series(ta.ema(close, length=20), out.index), close)
+        ema_50_pct = _pct_of_close(_safe_series(ta.ema(close, length=50), out.index), close)
+        ema_200_pct = _pct_of_close(_safe_series(ta.ema(close, length=200), out.index), close)
+        out["ema_20_pct"] = ema_20_pct
+        out["ema_50_pct"] = ema_50_pct
+        out["ema_200_pct"] = ema_200_pct
+
+        # Sesgo por alineacion de EMAs (2026-08-26, pedido explicito: "aseguraTE de
+        # que tenga en cuenta el bias diario"): bullish clasico = EMA rapida por
+        # encima de la intermedia por encima de la lenta (la tendencia viene
+        # empujando las EMAs cortas mas arriba que las largas), bearish al reves.
+        # ema_X_pct = (emaX-close)/close, asi que comparar los _pct directamente
+        # preserva el orden real de las EMAs (mismo close en el denominador de las 3).
+        #
+        # Es SOLO una feature mas para el mismo GBM (igual que regime_*, session_*)
+        # -- NO es un filtro que bloquee operaciones. El pipeline corre igual sobre
+        # D1/H1/M15/M5 (ver gbm_predictor.py: la misma lista de columnas se concatena
+        # una vez por temporalidad), asi que el modelo recibe el sesgo de las 4
+        # temporalidades a la vez, no solo D1 -- puede pesarlo tanto o tan poco como
+        # el entrenamiento demuestre que conviene, nunca es una regla dura que
+        # descarte una entrada solo por ir contra el sesgo.
+        out["bias_bullish"] = (ema_20_pct > ema_50_pct) & (ema_50_pct > ema_200_pct)
+        out["bias_bearish"] = (ema_20_pct < ema_50_pct) & (ema_50_pct < ema_200_pct)
+        out["bias_neutral"] = ~(out["bias_bullish"] | out["bias_bearish"])
 
     if "rsi" in include:
         out["rsi_14"] = _safe_series(ta.rsi(close, length=14), out.index)
@@ -97,5 +118,31 @@ def add_indicators(df: pd.DataFrame, include: list[str] | None = None) -> pd.Dat
         # operan tendencia con ADX alto, y las de mean-reversion prefieren ADX bajo.
         adx = _safe_frame(ta.adx(out["high"], out["low"], close, length=14), out.index, _ADX_COLUMNS)
         out = pd.concat([out, adx], axis=1)
+
+        # Regimen de mercado como feature enriquecida, NO como filtro/gate de reglas
+        # duras (2026-08-26): se decidio explicitamente que el modelo aprenda cuando
+        # usar el regimen, en vez de bloquear operaciones fuera de un ADX/volatilidad
+        # "correcto" -- mismo patron que sessions.py (categorias, no una excepcion
+        # de reglas por fuera del GBM).
+        #
+        # Tendencia (umbrales estandar de Wilder para ADX, no un valor inventado):
+        # <20 sin tendencia clara/rango, 20-25 tendencia debil/en formacion, >25
+        # tendencia fuerte.
+        adx_val = out["ADX_14"]
+        out["regime_ranging"] = adx_val < 20
+        out["regime_weak_trend"] = (adx_val >= 20) & (adx_val < 25)
+        out["regime_strong_trend"] = adx_val >= 25
+
+        # Volatilidad relativa a SU PROPIO historico reciente (no un umbral fijo en
+        # pips, que no es comparable entre simbolos): percentil 25/75 de atr_pct en
+        # una ventana movil de 100 velas (mismo lookback por defecto que ya se usa en
+        # otras features de este proyecto, ej. smc.py).
+        if "atr_pct" not in out.columns:
+            raise ValueError("El regimen de volatilidad requiere 'atr_pct' -- incluir 'atr' antes que 'adx' en features.indicators.include.")
+        atr_pct = out["atr_pct"]
+        vol_low_threshold = atr_pct.rolling(100).quantile(0.25)
+        vol_high_threshold = atr_pct.rolling(100).quantile(0.75)
+        out["regime_low_volatility"] = atr_pct < vol_low_threshold
+        out["regime_high_volatility"] = atr_pct > vol_high_threshold
 
     return out

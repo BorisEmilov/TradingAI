@@ -27,6 +27,7 @@ from threadpoolctl import threadpool_limits
 from tradingai.ai.data.features.pipeline import build_feature_pipeline
 from tradingai.ai.data.multi_timeframe import TIMEFRAMES
 from tradingai.ai.data.preprocessor import normalize_ohlcv
+from tradingai.core.instruments import compute_sl_tp_with_floor
 from tradingai.core.signal import Direction, TradingSignal
 
 _DIRECTION_MAP = {0: Direction.NEUTRAL, 1: Direction.LONG, 2: Direction.SHORT}
@@ -93,12 +94,18 @@ class GBMPredictor:
         model_cfg = self.config.get("model", {})
         tp_atr_mult = model_cfg.get("tp_atr_mult", _DEFAULT_TP_ATR_MULT)
         sl_atr_mult = model_cfg.get("sl_atr_mult", _DEFAULT_SL_ATR_MULT)
+        # Piso minimo de distancia de SL (2026-08-27): evidencia real de 3 dias de
+        # piloto -- operaciones con SL <8 pips ganaron 1/8 (-$1178.89) contra 8/18
+        # (+$493.61) en el resto. El ATR puede quedar muy bajo momentaneamente y dar
+        # un SL demasiado corto; ver tradingai.core.instruments.
+        min_sl_pips = model_cfg.get("min_sl_pips", 12.0)
 
         take_profit = stop_loss = None
         if atr is not None and direction != Direction.NEUTRAL:
             sign = 1 if direction == Direction.LONG else -1
-            take_profit = last_close + sign * tp_atr_mult * atr
-            stop_loss = last_close - sign * sl_atr_mult * atr
+            stop_loss, take_profit = compute_sl_tp_with_floor(
+                last_close, sign, atr, sl_atr_mult, tp_atr_mult, symbol, min_sl_pips,
+            )
 
         return TradingSignal(
             symbol=symbol,

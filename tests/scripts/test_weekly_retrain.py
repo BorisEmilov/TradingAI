@@ -38,3 +38,15 @@ def test_risk_line_regex_parses_real_log_format():
     sample = "Fold 2 riesgo: sharpe=0.323, sortino=0.600, max_drawdown=2.00%"
     matches = weekly_retrain._RISK_LINE.findall(sample)
     assert matches == [("0.323", "0.600", "2.00")]
+
+
+def test_expectancy_line_regex_parses_real_log_format():
+    sample = "Fold 2 expectancy_r=0.132, profit_factor=2.000"
+    matches = weekly_retrain._EXPECTANCY_LINE.findall(sample)
+    assert matches == [("0.132", "2.000")]
+
+
+def test_expectancy_line_regex_parses_infinite_profit_factor():
+    sample = "Fold 1 expectancy_r=0.450, profit_factor=inf"
+    matches = weekly_retrain._EXPECTANCY_LINE.findall(sample)
+    assert matches == [("0.450", "inf")]

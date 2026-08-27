@@ -18,7 +18,7 @@ def test_no_closed_trades_returns_empty_summary(tmp_path):
     path = tmp_path / "trades.csv"
     _write_trades_csv(path, ["2026-08-24T08:00:00+00:00,APERTURA,1,EURUSD,short,1.1000,1.1010,1.0980,0.80,3.0,"])
 
-    summary = daily_review.run_review(date(2026, 8, 24), path, tmp_path / "tight_stop_trades.csv")
+    summary = daily_review.run_review(date(2026, 8, 24), path, tmp_path / "tight_stop_trades.csv", tmp_path / "floored_stop_trades.csv")
 
     assert summary["n_closed"] == 0
 
@@ -35,7 +35,7 @@ def test_computes_win_rate_and_pnl_correctly(tmp_path):
         ],
     )
 
-    summary = daily_review.run_review(date(2026, 8, 24), path, tmp_path / "tight_stop_trades.csv")
+    summary = daily_review.run_review(date(2026, 8, 24), path, tmp_path / "tight_stop_trades.csv", tmp_path / "floored_stop_trades.csv")
 
     assert summary["n_closed"] == 2
     assert summary["win_rate"] == 0.5
@@ -52,7 +52,7 @@ def test_ignores_closes_from_other_dates(tmp_path):
         ],
     )
 
-    summary = daily_review.run_review(date(2026, 8, 24), path, tmp_path / "tight_stop_trades.csv")
+    summary = daily_review.run_review(date(2026, 8, 24), path, tmp_path / "tight_stop_trades.csv", tmp_path / "floored_stop_trades.csv")
 
     assert summary["n_closed"] == 0
 
@@ -67,12 +67,13 @@ def test_flags_trade_with_tight_stop_loss(tmp_path):
     # este mecanismo de deteccion.
     path = tmp_path / "trades.csv"
     tight_stop_path = tmp_path / "tight_stop_trades.csv"
+    floored_stop_path = tmp_path / "floored_stop_trades.csv"
     _write_trades_csv(
         path,
         ["2026-08-25T07:00:04+00:00,APERTURA,58140748366,GBPUSD,short,1.36286,1.36356,1.36150,0.84,2.72,"],
     )
 
-    daily_review.run_review(date(2026, 8, 25), path, tight_stop_path)
+    daily_review.run_review(date(2026, 8, 25), path, tight_stop_path, floored_stop_path)
 
     assert tight_stop_path.exists()
     flagged = tight_stop_path.read_text()
@@ -82,12 +83,13 @@ def test_flags_trade_with_tight_stop_loss(tmp_path):
 def test_does_not_flag_trade_with_normal_stop_loss(tmp_path):
     path = tmp_path / "trades.csv"
     tight_stop_path = tmp_path / "tight_stop_trades.csv"
+    floored_stop_path = tmp_path / "floored_stop_trades.csv"
     _write_trades_csv(
         path,
         ["2026-08-25T07:00:04+00:00,APERTURA,1,GBPUSD,short,1.36286,1.36486,1.35886,0.84,2.72,"],
     )
 
-    daily_review.run_review(date(2026, 8, 25), path, tight_stop_path)
+    daily_review.run_review(date(2026, 8, 25), path, tight_stop_path, floored_stop_path)
 
     assert not tight_stop_path.exists()
 
@@ -95,12 +97,51 @@ def test_does_not_flag_trade_with_normal_stop_loss(tmp_path):
 def test_does_not_flag_the_same_ticket_twice_across_reruns(tmp_path):
     path = tmp_path / "trades.csv"
     tight_stop_path = tmp_path / "tight_stop_trades.csv"
+    floored_stop_path = tmp_path / "floored_stop_trades.csv"
     _write_trades_csv(
         path,
         ["2026-08-25T07:00:04+00:00,APERTURA,58140748366,GBPUSD,short,1.36286,1.36356,1.36150,0.84,2.72,"],
     )
 
-    daily_review.run_review(date(2026, 8, 25), path, tight_stop_path)
-    daily_review.run_review(date(2026, 8, 25), path, tight_stop_path)
+    daily_review.run_review(date(2026, 8, 25), path, tight_stop_path, floored_stop_path)
+    daily_review.run_review(date(2026, 8, 25), path, tight_stop_path, floored_stop_path)
 
     assert tight_stop_path.read_text().count("58140748366") == 1
+
+
+def test_flags_trade_with_sl_floor_applied(tmp_path):
+    # EURJPY con SL a exactamente 12 pips (0.12, pip=0.01) -- el piso minimo
+    # configurado (min_sl_pips=12.0) actuando, caso real del 2026-08-27.
+    path = tmp_path / "trades.csv"
+    tight_stop_path = tmp_path / "tight_stop_trades.csv"
+    floored_stop_path = tmp_path / "floored_stop_trades.csv"
+    _write_trades_csv(
+        path,
+        ["2026-08-27T07:00:02+00:00,APERTURA,58200000001,EURJPY,short,185.710,185.830,185.470,0.88,3.32,"],
+    )
+
+    daily_review.run_review(date(2026, 8, 27), path, tight_stop_path, floored_stop_path)
+
+    assert floored_stop_path.exists()
+    assert "58200000001" in floored_stop_path.read_text()
+
+
+def test_does_not_flag_trade_with_sl_far_from_floor(tmp_path):
+    # SL bien por encima del piso (20 pips en EURUSD) -> no es un caso del piso.
+    path = tmp_path / "trades.csv"
+    tight_stop_path = tmp_path / "tight_stop_trades.csv"
+    floored_stop_path = tmp_path / "floored_stop_trades.csv"
+    _write_trades_csv(
+        path,
+        ["2026-08-27T07:00:02+00:00,APERTURA,2,EURUSD,short,1.1000,1.1020,1.0960,0.88,3.0,"],
+    )
+
+    daily_review.run_review(date(2026, 8, 27), path, tight_stop_path, floored_stop_path)
+
+    assert not floored_stop_path.exists()
+
+
+def test_does_not_flag_index_symbol_for_floor():
+    # US500 no tiene piso (pips de forex no aplica a un indice) -- nunca deberia
+    # marcarse como "floored" sin importar la distancia del SL.
+    assert not daily_review._is_floored_stop("US500", entry=7680.0, sl=7679.88)

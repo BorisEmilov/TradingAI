@@ -34,5 +34,13 @@ def test_feature_pipeline_runs(synthetic_candles):
         "bearish_momentum_divergence",
         "bullish_momentum_divergence",
         "ADX_14",
+        "regime_ranging",
+        "regime_weak_trend",
+        "regime_strong_trend",
+        "regime_low_volatility",
+        "regime_high_volatility",
+        "bias_bullish",
+        "bias_bearish",
+        "bias_neutral",
     ]:
         assert col in features.columns

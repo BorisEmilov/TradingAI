@@ -41,6 +41,7 @@ from loguru import logger  # noqa: E402
 RESULTS_LOG = PROJECT_ROOT / "data" / "models" / "weekly_retrain_history.json"
 _FOLD_LINE = re.compile(r"BACKTEST.*?win_rate=([\d.]+)%, pnl=(-?[\d.]+)%")
 _RISK_LINE = re.compile(r"riesgo: sharpe=(-?[\d.]+), sortino=(-?[\d.]+), max_drawdown=([\d.]+)%")
+_EXPECTANCY_LINE = re.compile(r"expectancy_r=(-?[\d.]+), profit_factor=(-?[\d.]+|inf)")
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -64,6 +65,11 @@ def _walk_forward_folds(symbol: str, confidence_threshold: float, thermal_args: 
         fold["sharpe"] = float(sharpe)
         fold["sortino"] = float(sortino)
         fold["max_drawdown_pct"] = float(max_dd)
+
+    expectancy_stats = _EXPECTANCY_LINE.findall(output)
+    for fold, (expectancy_r, profit_factor) in zip(fold_stats, expectancy_stats):
+        fold["expectancy_r"] = float(expectancy_r)
+        fold["profit_factor"] = float(profit_factor)  # float("inf") parsea bien "inf"
     return fold_stats
 
 
@@ -76,12 +82,6 @@ def _should_promote(folds: list[dict]) -> bool:
 
 
 def retrain_symbol(symbol: str, confidence_threshold: float, thermal_args: list[str]) -> dict:
-    logger.info(f"[{symbol}] Refrescando historico de mercado")
-    fetch = _run([sys.executable, "scripts/fetch_historical_data.py", "--symbols", symbol])
-    if fetch.returncode != 0:
-        logger.error(f"[{symbol}] Fallo al descargar historico, se salta este simbolo:\n{fetch.stderr}")
-        return {"symbol": symbol, "error": "fetch_failed"}
-
     logger.info(f"[{symbol}] Walk-forward de validacion")
     folds = _walk_forward_folds(symbol, confidence_threshold, thermal_args)
     promote = _should_promote(folds)
@@ -117,6 +117,12 @@ def main() -> None:
     parser.add_argument("--max-threads", type=int, default=1)
     parser.add_argument("--max-temp-c", type=float, default=80.0)
     parser.add_argument("--fold-cooldown-seconds", type=float, default=20.0)
+    parser.add_argument(
+        "--skip-fetch", action="store_true",
+        help="No descargar historico (usar el ya presente en data/raw/) -- para cuando se quiere "
+             "apagar el bridge/Wine ANTES de entrenar (ver conversacion 2026-08-25/26: entrenar sin "
+             "limite de hilos con el bridge todavia vivo puede tumbar la terminal MT5).",
+    )
     args = parser.parse_args()
 
     config = get_settings()
@@ -127,6 +133,24 @@ def main() -> None:
         "--max-temp-c", str(args.max_temp_c),
         "--fold-cooldown-seconds", str(args.fold_cooldown_seconds),
     ]
+
+    # Descarga UNA sola vez, para todos los simbolos, antes de entrenar nada -- no
+    # intercalada por simbolo. `baseline_gbm.py`/`train_gbm.py` solo leen CSVs locales
+    # (data/raw/), no necesitan el bridge/MT5 en absoluto. Intercalar fetch+train por
+    # simbolo (como se hacia antes) deja el entrenamiento pesado corriendo mientras el
+    # bridge sigue vivo -- y un entrenamiento sin limite de hilos puede saturar tanto
+    # la CPU que tira la terminal MT5 (visto en vivo el 2026-08-25), rompiendo en
+    # cascada la descarga de TODOS los simbolos siguientes. Separar las fases evita
+    # ese riesgo por completo: la parte que necesita al bridge termina en segundos,
+    # mucho antes de que el entrenamiento pesado siquiera empiece.
+    if args.skip_fetch:
+        logger.info(f"--skip-fetch: usando el historico ya presente en data/raw/ para {len(symbols)} simbolos")
+    else:
+        logger.info(f"Descargando historico fresco para {len(symbols)} simbolos (requiere el bridge MT5 vivo)")
+        fetch = _run([sys.executable, "scripts/fetch_historical_data.py", "--symbols", *symbols])
+        if fetch.returncode != 0:
+            logger.error(f"Fallo la descarga de historico (¿bridge MT5 caido?), se aborta sin entrenar nada:\n{fetch.stderr}")
+            return
 
     run_date = datetime.now(timezone.utc).isoformat()
     results = [retrain_symbol(symbol, confidence_threshold, thermal_args) for symbol in symbols]

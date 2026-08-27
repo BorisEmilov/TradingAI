@@ -39,6 +39,8 @@ class RiskManager:
         self,
         risk_per_trade_pct: float = 1.0,
         max_open_positions: int = 3,
+        max_open_positions_high_confidence: int | None = None,
+        high_confidence_override: float = 0.90,
         min_risk_reward_ratio: float = MIN_RISK_REWARD_RATIO,
         max_daily_drawdown_pct: float | None = None,
         trading_hours_utc: tuple[int, int] | None = None,
@@ -56,6 +58,18 @@ class RiskManager:
     ) -> None:
         self.risk_per_trade_pct = risk_per_trade_pct
         self.max_open_positions = max_open_positions
+        # Techo HARD, no ilimitado (2026-08-27, pedido explicito): una señal de
+        # confianza muy alta puede superar `max_open_positions`, pero solo hasta
+        # este techo -- confianza alta no es lo mismo que "seguro" (el modelo puede
+        # estar muy confiado y equivocado, ej. en un cambio de regimen o antes de
+        # una noticia), y sin techo un dia con muchos simbolos confiados a la vez
+        # (ej. una racha fuerte del dolar) podria acumular demasiada exposicion
+        # correlacionada de golpe. None = sin excepcion, `max_open_positions` sigue
+        # siendo un techo absoluto. El resto de controles (VaR de portafolio,
+        # correlacion por divisa, drawdown) se siguen aplicando igual a estas
+        # señales, no se saltan.
+        self.max_open_positions_high_confidence = max_open_positions_high_confidence
+        self.high_confidence_override = high_confidence_override
         # Piso duro: nunca se acepta un ratio por debajo de MIN_RISK_REWARD_RATIO,
         # aunque se intente configurar mas bajo.
         self.min_risk_reward_ratio = max(min_risk_reward_ratio, MIN_RISK_REWARD_RATIO)
@@ -108,7 +122,7 @@ class RiskManager:
         self._day_start_equity: float | None = None
 
     def approve(self, signal: TradingSignal) -> bool:
-        if self._get_open_positions_count() >= self.max_open_positions:
+        if not self._within_open_positions_limit(signal):
             logger.debug("Rechazada: limite de posiciones abiertas alcanzado")
             return False
 
@@ -190,6 +204,19 @@ class RiskManager:
 
         drawdown_pct = (self._day_start_equity - equity) / self._day_start_equity * 100
         return drawdown_pct >= self.max_daily_drawdown_pct
+
+    def _within_open_positions_limit(self, signal: TradingSignal) -> bool:
+        open_count = self._get_open_positions_count()
+        if open_count < self.max_open_positions:
+            return True
+        # Por encima del limite base: solo pasa si hay un techo alto configurado, la
+        # señal tiene confianza suficiente, Y todavia hay lugar bajo ESE techo (nunca
+        # sin limite -- ver comentario en __init__).
+        if self.max_open_positions_high_confidence is None:
+            return False
+        if open_count >= self.max_open_positions_high_confidence:
+            return False
+        return signal.confidence >= self.high_confidence_override
 
     def _within_positions_per_symbol(self, signal: TradingSignal) -> bool:
         positions = self._get_open_positions()

@@ -4,13 +4,13 @@ from tradingai.core.signal import Direction, TradingSignal
 from tradingai.mt5.risk_manager import RiskManager
 
 
-def _signal(entry, sl, tp, symbol="EURUSD", direction=Direction.LONG, timestamp=None) -> TradingSignal:
+def _signal(entry, sl, tp, symbol="EURUSD", direction=Direction.LONG, timestamp=None, confidence=0.8) -> TradingSignal:
     return TradingSignal(
         symbol=symbol,
         timeframe="M15",
         timestamp=timestamp or datetime.now(timezone.utc),
         direction=direction,
-        confidence=0.8,
+        confidence=confidence,
         entry_price=entry,
         stop_loss=sl,
         take_profit=tp,
@@ -20,6 +20,47 @@ def _signal(entry, sl, tp, symbol="EURUSD", direction=Direction.LONG, timestamp=
 def test_rejects_when_max_positions_reached():
     rm = RiskManager(max_open_positions=2, get_open_positions_count=lambda: 2)
     assert not rm.approve(_signal(1.1000, 1.0950, 1.1100))
+
+
+def test_rejects_above_max_positions_when_no_high_confidence_override_configured():
+    # Sin `max_open_positions_high_confidence`, el limite base es absoluto -- ni una
+    # confianza altisima lo supera.
+    rm = RiskManager(max_open_positions=4, get_open_positions_count=lambda: 4)
+    assert not rm.approve(_signal(1.1000, 1.0950, 1.1100, confidence=0.99))
+
+
+def test_allows_override_above_base_limit_with_high_confidence():
+    rm = RiskManager(
+        max_open_positions=4, max_open_positions_high_confidence=6, high_confidence_override=0.90,
+        get_open_positions_count=lambda: 4,
+    )
+    assert rm.approve(_signal(1.1000, 1.0950, 1.1200, confidence=0.92))
+
+
+def test_rejects_override_when_confidence_below_threshold():
+    rm = RiskManager(
+        max_open_positions=4, max_open_positions_high_confidence=6, high_confidence_override=0.90,
+        get_open_positions_count=lambda: 4,
+    )
+    assert not rm.approve(_signal(1.1000, 1.0950, 1.1100, confidence=0.85))
+
+
+def test_rejects_when_high_confidence_ceiling_also_reached():
+    # El techo alto tampoco es ilimitado -- una vez alcanzado, se rechaza igual
+    # aunque la confianza sea altisima.
+    rm = RiskManager(
+        max_open_positions=4, max_open_positions_high_confidence=6, high_confidence_override=0.90,
+        get_open_positions_count=lambda: 6,
+    )
+    assert not rm.approve(_signal(1.1000, 1.0950, 1.1100, confidence=0.99))
+
+
+def test_within_base_limit_does_not_need_high_confidence():
+    rm = RiskManager(
+        max_open_positions=4, max_open_positions_high_confidence=6, high_confidence_override=0.90,
+        get_open_positions_count=lambda: 3,
+    )
+    assert rm.approve(_signal(1.1000, 1.0950, 1.1200, confidence=0.76))
 
 
 def test_rejects_low_risk_reward():

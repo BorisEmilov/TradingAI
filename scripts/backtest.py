@@ -33,7 +33,7 @@ from tradingai.ai.data.features.pipeline import build_feature_pipeline  # noqa: 
 from tradingai.ai.data.loader import load_csv  # noqa: E402
 from tradingai.ai.data.multi_timeframe import TIMEFRAMES, last_closed_bar_index  # noqa: E402
 from tradingai.ai.data.preprocessor import normalize_ohlcv  # noqa: E402
-from tradingai.ai.evaluation.backtester import Backtester, summarize  # noqa: E402
+from tradingai.ai.evaluation.backtester import Backtester, pip_size, resolve_spread_pips, summarize  # noqa: E402
 from tradingai.ai.inference.gbm_predictor import GBMPredictor  # noqa: E402
 from tradingai.ai.inference.predictor import Predictor  # noqa: E402
 from tradingai.ai.training.dataset import MultiTimeframeTradingDataset  # noqa: E402
@@ -41,15 +41,6 @@ from tradingai.core.pipeline import FEATURE_WARMUP_BARS  # noqa: E402
 from tradingai.utils.logging import setup_logging  # noqa: E402
 
 from loguru import logger  # noqa: E402
-
-
-def _pip_size(symbol: str) -> float:
-    """Heuristico offline (sin conexion a MT5): JPY y metales cotizan con pip mas grande."""
-    if symbol.upper().endswith("JPY"):
-        return 0.01
-    if symbol.upper() in {"XAUUSD", "XAGUSD"}:
-        return 0.01
-    return 0.0001
 
 
 def _validation_start_index(
@@ -179,12 +170,12 @@ def main() -> None:
     if args.no_costs:
         spread_pips = slippage_pips = commission_pips = 0.0
     else:
-        spread_pips = backtest_cfg.get("spread_pips", 1.0)
+        spread_pips = resolve_spread_pips(backtest_cfg, args.symbol)
         slippage_pips = backtest_cfg.get("slippage_pips", 0.2)
         commission_pips = backtest_cfg.get("commission_pips", 0.0)
     logger.info(
         f"costes: spread={spread_pips} slippage={slippage_pips} comision={commission_pips} pips "
-        f"(pip_size={_pip_size(args.symbol)})"
+        f"(pip_size={pip_size(args.symbol)})"
     )
 
     backtester = Backtester(
@@ -193,7 +184,7 @@ def main() -> None:
         spread_pips=spread_pips,
         slippage_pips=slippage_pips,
         commission_pips=commission_pips,
-        pip_size=_pip_size(args.symbol),
+        pip_size=pip_size(args.symbol),
     )
     trades = backtester.run(m15, signals)
 

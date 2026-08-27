@@ -14,7 +14,7 @@ def test_long_does_not_activate_before_reaching_r_multiple():
     # a favor (0.5R) -- no deberia activarse todavia con el default de 1R.
     candles = _candles([1.0975, 1.0985, 1.0995, 1.1005, 1.1015, 1.1010, 1.1008, 1.1009])
     new_sl = compute_trailing_sl(
-        candles, Direction.LONG, entry_price=1.1000, current_sl=1.0980, current_price=1.1010,
+        candles, Direction.LONG, entry_price=1.1000, initial_risk=0.0020, current_sl=1.0980, current_price=1.1010,
     )
     assert new_sl is None
 
@@ -25,7 +25,7 @@ def test_long_moves_sl_to_last_confirmed_swing_low_once_activated():
     lows = [1.1030, 1.1020, 1.1010, 1.0995, 1.1005, 1.1015, 1.1025, 1.1035]
     candles = _candles(lows)
     new_sl = compute_trailing_sl(
-        candles, Direction.LONG, entry_price=1.1000, current_sl=1.0980, current_price=1.1030,
+        candles, Direction.LONG, entry_price=1.1000, initial_risk=0.0020, current_sl=1.0980, current_price=1.1030,
     )
     assert new_sl == 1.0995
 
@@ -35,7 +35,7 @@ def test_long_never_loosens_the_stop():
     lows = [1.1030, 1.1020, 1.1010, 1.0995, 1.1005, 1.1015, 1.1025, 1.1035]
     candles = _candles(lows)
     new_sl = compute_trailing_sl(
-        candles, Direction.LONG, entry_price=1.1000, current_sl=1.0999, current_price=1.1030,
+        candles, Direction.LONG, entry_price=1.1000, initial_risk=0.0001, current_sl=1.0999, current_price=1.1030,
     )
     assert new_sl is None
 
@@ -45,7 +45,7 @@ def test_short_moves_sl_to_last_confirmed_swing_high_once_activated():
     highs = [1.0970, 1.0980, 1.0990, 1.1005, 1.0995, 1.0985, 1.0975, 1.0965]
     candles = _candles(lows=[h - 0.0010 for h in highs], highs=highs)
     new_sl = compute_trailing_sl(
-        candles, Direction.SHORT, entry_price=1.1000, current_sl=1.1020, current_price=1.0970,
+        candles, Direction.SHORT, entry_price=1.1000, initial_risk=0.0020, current_sl=1.1020, current_price=1.0970,
     )
     assert new_sl == 1.1005
 
@@ -55,7 +55,7 @@ def test_returns_none_when_no_swing_confirmed_yet():
     lows = [1.1000, 1.0990, 1.0980, 1.0970, 1.0960, 1.0950, 1.0940]
     candles = _candles(lows)
     new_sl = compute_trailing_sl(
-        candles, Direction.LONG, entry_price=1.1000, current_sl=1.0950, current_price=1.1200,
+        candles, Direction.LONG, entry_price=1.1000, initial_risk=0.0050, current_sl=1.0950, current_price=1.1200,
     )
     assert new_sl is None
 
@@ -67,6 +67,20 @@ def test_ignores_swing_that_would_leave_no_room_to_current_price():
     lows = [1.1030, 1.1020, 1.1010, 1.1005, 1.1015, 1.1020, 1.1025, 1.1030]
     candles = _candles(lows)
     new_sl = compute_trailing_sl(
-        candles, Direction.LONG, entry_price=1.0950, current_sl=1.0930, current_price=1.1000,
+        candles, Direction.LONG, entry_price=1.0950, initial_risk=0.0020, current_sl=1.0930, current_price=1.1000,
     )
     assert new_sl is None
+
+
+def test_still_works_after_sl_was_moved_to_breakeven():
+    # Bug real del 2026-08-26: si el SL ya esta en breakeven (=entry, por un cierre
+    # parcial previo, ver mt5.scaled_exit), entry_price-current_sl daria 0 y el
+    # trailing se romperia para siempre en esa operacion. Al pasar `initial_risk`
+    # explicito (el riesgo ORIGINAL, no recalculado del SL actual), sigue funcionando
+    # y puede seguir mejorando el SL mas alla de breakeven.
+    lows = [1.1050, 1.1040, 1.1030, 1.1010, 1.1020, 1.1030, 1.1040, 1.1050]
+    candles = _candles(lows)
+    new_sl = compute_trailing_sl(
+        candles, Direction.LONG, entry_price=1.1000, initial_risk=0.0020, current_sl=1.1000, current_price=1.1030,
+    )
+    assert new_sl == 1.1010

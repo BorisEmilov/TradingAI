@@ -31,7 +31,7 @@ from tradingai.ai.data.features.pipeline import build_feature_pipeline, select_f
 from tradingai.ai.data.loader import load_csv  # noqa: E402
 from tradingai.ai.data.multi_timeframe import TIMEFRAMES, last_closed_bar_index  # noqa: E402
 from tradingai.ai.data.preprocessor import normalize_ohlcv  # noqa: E402
-from tradingai.ai.evaluation.backtester import Backtester, summarize  # noqa: E402
+from tradingai.ai.evaluation.backtester import Backtester, pip_size, resolve_spread_pips, summarize  # noqa: E402
 from tradingai.ai.inference.predictor import Predictor  # noqa: E402
 from tradingai.ai.models.base import build_model  # noqa: E402
 from tradingai.ai.training.dataset import MultiTimeframeTradingDataset  # noqa: E402
@@ -41,12 +41,6 @@ from tradingai.utils.logging import setup_logging  # noqa: E402
 from tradingai.utils.seed import set_seed  # noqa: E402
 
 from loguru import logger  # noqa: E402
-
-
-def _pip_size(symbol: str) -> float:
-    if symbol.upper().endswith("JPY") or symbol.upper() in {"XAUUSD", "XAGUSD"}:
-        return 0.01
-    return 0.0001
 
 
 def main() -> None:
@@ -137,10 +131,10 @@ def main() -> None:
         backtester = Backtester(
             confidence_threshold=args.confidence_threshold,
             max_holding_bars=backtest_cfg.get("max_holding_bars", 50),
-            spread_pips=backtest_cfg.get("spread_pips", 1.0),
+            spread_pips=resolve_spread_pips(backtest_cfg, args.symbol),
             slippage_pips=backtest_cfg.get("slippage_pips", 0.2),
             commission_pips=backtest_cfg.get("commission_pips", 0.0),
-            pip_size=_pip_size(args.symbol),
+            pip_size=pip_size(args.symbol),
         )
         trades = backtester.run(m15_raw, signals)
         stats = summarize(trades)

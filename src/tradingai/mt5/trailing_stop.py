@@ -22,30 +22,14 @@ from __future__ import annotations
 import pandas as pd
 
 from tradingai.core.signal import Direction
-
-
-def _last_confirmed_swing_low(candles: pd.DataFrame, left: int = 3, right: int = 3) -> float | None:
-    lows = candles["low"].to_numpy()
-    n = len(lows)
-    for i in range(n - right - 1, left - 1, -1):
-        if lows[i] < lows[i - left:i].min() and lows[i] < lows[i + 1:i + 1 + right].min():
-            return float(lows[i])
-    return None
-
-
-def _last_confirmed_swing_high(candles: pd.DataFrame, left: int = 3, right: int = 3) -> float | None:
-    highs = candles["high"].to_numpy()
-    n = len(highs)
-    for i in range(n - right - 1, left - 1, -1):
-        if highs[i] > highs[i - left:i].max() and highs[i] > highs[i + 1:i + 1 + right].max():
-            return float(highs[i])
-    return None
+from tradingai.core.structure import last_confirmed_swing_high, last_confirmed_swing_low
 
 
 def compute_trailing_sl(
     candles: pd.DataFrame,
     direction: Direction,
     entry_price: float,
+    initial_risk: float,
     current_sl: float,
     current_price: float,
     r_multiple_to_activate: float = 1.0,
@@ -55,12 +39,19 @@ def compute_trailing_sl(
     """Devuelve el nuevo SL si corresponde moverlo, o None si no hay que tocarlo.
 
     No se activa hasta que el precio se movio a favor al menos
-    `r_multiple_to_activate` veces la distancia de riesgo inicial (entry - SL
-    original). A partir de ahi, busca el ultimo swing confirmado a favor del precio
-    y solo lo acepta como nuevo SL si mejora al actual y sigue dejando margen hasta
-    el precio de mercado.
+    `r_multiple_to_activate` veces `initial_risk` (la distancia de riesgo ORIGINAL,
+    entry - SL en el momento de abrir -- pasada explicitamente por el llamador, NO
+    recalculada de `current_sl` en cada llamada). Esto importa porque `current_sl`
+    puede haber cambiado desde entonces (trailing previo, o un cierre parcial que
+    movio el SL a breakeven -- ver mt5.scaled_exit): si se recalculara
+    `entry_price - current_sl` aca, un SL en breakeven daria risk=0 y el trailing se
+    romperia en silencio para siempre en esa operacion (bug real encontrado el
+    2026-08-26 al combinar esto con el cierre parcial).
+
+    A partir de ahi, busca el ultimo swing confirmado a favor del precio y solo lo
+    acepta como nuevo SL si mejora a `current_sl` y sigue dejando margen hasta el
+    precio de mercado.
     """
-    initial_risk = abs(entry_price - current_sl)
     if initial_risk <= 0:
         return None
 
@@ -68,7 +59,7 @@ def compute_trailing_sl(
         profit_distance = current_price - entry_price
         if profit_distance < r_multiple_to_activate * initial_risk:
             return None
-        swing = _last_confirmed_swing_low(candles, swing_left, swing_right)
+        swing = last_confirmed_swing_low(candles, swing_left, swing_right)
         if swing is None or swing <= current_sl or swing >= current_price:
             return None
         return swing
@@ -77,7 +68,7 @@ def compute_trailing_sl(
         profit_distance = entry_price - current_price
         if profit_distance < r_multiple_to_activate * initial_risk:
             return None
-        swing = _last_confirmed_swing_high(candles, swing_left, swing_right)
+        swing = last_confirmed_swing_high(candles, swing_left, swing_right)
         if swing is None or swing >= current_sl or swing <= current_price:
             return None
         return swing

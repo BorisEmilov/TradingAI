@@ -28,10 +28,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from tradingai.core.instruments import min_sl_distance_price, pip_size  # noqa: E402
 from tradingai.mt5.trade_log import append_trade_event, COLUMNS as TRADE_LOG_COLUMNS  # noqa: E402
 
 TRADES_LOG_DEFAULT = PROJECT_ROOT / "logs" / "live" / "trades.csv"
 TIGHT_STOP_LOG_DEFAULT = PROJECT_ROOT / "logs" / "live" / "tight_stop_trades.csv"
+FLOORED_STOP_LOG_DEFAULT = PROJECT_ROOT / "logs" / "live" / "floored_stop_trades.csv"
 
 # Distancia MINIMA de SL por debajo de la cual se considera "stop demasiado pegado"
 # y se guarda para revision -- ver el hallazgo del 2026-08-25 (GBPUSD, SL a 7 pips,
@@ -52,6 +54,28 @@ _DEFAULT_MIN_SL = _FX_MIN_SL
 
 def _min_sl_distance(symbol: str) -> float:
     return MIN_SL_DISTANCE.get(symbol, _DEFAULT_MIN_SL)
+
+
+# Deteccion de operaciones donde el PISO minimo de SL (2026-08-27,
+# `tradingai.core.instruments.compute_sl_tp_with_floor`, `min_sl_pips=12.0` en
+# config.yaml) se activo -- es decir, el ATR momentaneo hubiera dado un SL mas corto
+# y se ensancho. El usuario pregunto si en vez de ensanchar convendria descartar
+# directamente esas señales (su hipotesis: un SL pegado indica que el modelo no lee
+# bien la estructura); se le explico que el SL no lo decide el modelo -- es una
+# formula fija sobre el ATR, independiente de la lectura de estructura -- y que
+# rechazar de plano arriesga descartar rupturas genuinas (la volatilidad comprimida
+# suele preceder movimientos fuertes). Se acordo NO decidir a ciegas: rastrear estas
+# operaciones por separado unos dias y comparar su rendimiento contra el resto antes
+# de elegir entre "seguir ensanchando" y "descartar directamente".
+_FLOOR_TOLERANCE_PIPS = 0.5
+
+
+def _is_floored_stop(symbol: str, entry: float, sl: float, min_sl_pips: float = 12.0) -> bool:
+    floor = min_sl_distance_price(symbol, min_sl_pips)
+    if floor <= 0:
+        return False
+    distance = abs(entry - sl)
+    return abs(distance - floor) <= _FLOOR_TOLERANCE_PIPS * pip_size(symbol)
 
 
 def _load_trades(path: Path, target_date: date_cls) -> tuple[dict[str, dict], dict[str, dict]]:
@@ -110,7 +134,29 @@ def _flag_tight_stops(opens: dict[str, dict], target_date: date_cls, tight_stop_
     return n_flagged
 
 
-def run_review(target_date: date_cls, trades_log_path: Path, tight_stop_log_path: Path = TIGHT_STOP_LOG_DEFAULT) -> dict:
+def _flag_floored_stops(opens: dict[str, dict], target_date: date_cls, floored_log_path: Path) -> int:
+    already_flagged = _already_flagged_tickets(floored_log_path)
+    n_flagged = 0
+    for ticket, open_row in opens.items():
+        if ticket in already_flagged:
+            continue
+        if datetime.fromisoformat(open_row["timestamp"]).date() != target_date:
+            continue
+        entry, sl = float(open_row["price"] or 0), float(open_row["sl"] or 0)
+        if not sl:
+            continue
+        if _is_floored_stop(open_row["symbol"], entry, sl):
+            append_trade_event(floored_log_path, **{c: open_row.get(c, "") for c in TRADE_LOG_COLUMNS})
+            n_flagged += 1
+    return n_flagged
+
+
+def run_review(
+    target_date: date_cls,
+    trades_log_path: Path,
+    tight_stop_log_path: Path = TIGHT_STOP_LOG_DEFAULT,
+    floored_stop_log_path: Path = FLOORED_STOP_LOG_DEFAULT,
+) -> dict:
     opens, closes = _load_trades(trades_log_path, target_date)
 
     print(f"=== Revision diaria del piloto — {target_date.isoformat()} ===\n")
@@ -118,6 +164,10 @@ def run_review(target_date: date_cls, trades_log_path: Path, tight_stop_log_path
     n_tight = _flag_tight_stops(opens, target_date, tight_stop_log_path)
     if n_tight:
         print(f"Guardadas {n_tight} operacion(es) con stop demasiado pegado en {tight_stop_log_path}\n")
+
+    n_floored = _flag_floored_stops(opens, target_date, floored_stop_log_path)
+    if n_floored:
+        print(f"Guardadas {n_floored} operacion(es) con el piso minimo de SL aplicado en {floored_stop_log_path}\n")
 
     if not closes:
         print("Sin operaciones cerradas ese dia.")
@@ -130,9 +180,11 @@ def run_review(target_date: date_cls, trades_log_path: Path, tight_stop_log_path
 
     total_pnl = 0.0
     wins = 0
+    profits: list[float] = []
     for ticket, close in closes.items():
         profit = float(close["profit"]) if close["profit"] not in ("", None) else 0.0
         total_pnl += profit
+        profits.append(profit)
         if profit > 0:
             wins += 1
 
@@ -158,9 +210,18 @@ def run_review(target_date: date_cls, trades_log_path: Path, tight_stop_log_path
             unknown_close += 1
 
     n = len(closes)
+    gross_profit = sum(p for p in profits if p > 0)
+    gross_loss = -sum(p for p in profits if p < 0)
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf") if gross_profit > 0 else 0.0
+
     print(f"Operaciones cerradas: {n}")
     print(f"Win rate: {wins}/{n} ({wins / n * 100:.1f}%)")
     print(f"PnL total: ${total_pnl:.2f}  (medio: ${total_pnl / n:.2f}/operacion)")
+    # Profit factor en $ (ganancia bruta / perdida bruta): un win rate bajo con
+    # profit factor alto (ganadoras grandes, perdedoras chicas) puede ser mas sano
+    # que al reves -- ver conversacion 2026-08-26, el % de aciertos aislado no dice
+    # si el sistema es rentable.
+    print(f"Profit factor: {profit_factor:.2f}  (ganancia bruta ${gross_profit:.2f} / perdida bruta ${gross_loss:.2f})")
     print(f"Cierres por SL (aprox.): {sl_hits}  |  por TP (aprox.): {tp_hits}  |  sin apertura registrada: {unknown_close}")
     print()
 
@@ -173,6 +234,7 @@ def run_review(target_date: date_cls, trades_log_path: Path, tight_stop_log_path
         "n_closed": n,
         "win_rate": wins / n,
         "total_pnl": total_pnl,
+        "profit_factor": profit_factor,
         "by_symbol": {k: sum(v) for k, v in by_symbol.items()},
     }
 
@@ -182,13 +244,15 @@ def main() -> None:
     parser.add_argument("--date", default=None, help="YYYY-MM-DD en UTC; por defecto, hoy")
     parser.add_argument("--trades-log", default=None)
     parser.add_argument("--tight-stop-log", default=None)
+    parser.add_argument("--floored-stop-log", default=None)
     args = parser.parse_args()
 
     target_date = date_cls.fromisoformat(args.date) if args.date else datetime.now(timezone.utc).date()
     trades_log_path = Path(args.trades_log) if args.trades_log else TRADES_LOG_DEFAULT
     tight_stop_log_path = Path(args.tight_stop_log) if args.tight_stop_log else TIGHT_STOP_LOG_DEFAULT
+    floored_stop_log_path = Path(args.floored_stop_log) if args.floored_stop_log else FLOORED_STOP_LOG_DEFAULT
 
-    run_review(target_date, trades_log_path, tight_stop_log_path)
+    run_review(target_date, trades_log_path, tight_stop_log_path, floored_stop_log_path)
 
 
 if __name__ == "__main__":

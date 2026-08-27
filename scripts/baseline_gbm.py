@@ -36,7 +36,7 @@ from tradingai.ai.data.features.pipeline import build_feature_pipeline, select_f
 from tradingai.ai.data.loader import load_csv  # noqa: E402
 from tradingai.ai.data.multi_timeframe import TIMEFRAMES, flatten_last_timestep  # noqa: E402
 from tradingai.ai.data.preprocessor import normalize_ohlcv  # noqa: E402
-from tradingai.ai.evaluation.backtester import Backtester, summarize  # noqa: E402
+from tradingai.ai.evaluation.backtester import Backtester, pip_size, resolve_spread_pips, summarize  # noqa: E402
 from tradingai.ai.training.dataset import MultiTimeframeTradingDataset  # noqa: E402
 from tradingai.core.signal import Direction, TradingSignal  # noqa: E402
 from tradingai.utils.logging import setup_logging  # noqa: E402
@@ -47,11 +47,6 @@ from loguru import logger  # noqa: E402
 
 DIRECTION_NAMES = {0: "neutral", 1: "long", 2: "short"}
 _DIRECTION_MAP = {0: Direction.NEUTRAL, 1: Direction.LONG, 2: Direction.SHORT}
-
-def _pip_size(symbol: str) -> float:
-    if symbol.upper().endswith("JPY") or symbol.upper() in {"XAUUSD", "XAGUSD"}:
-        return 0.01
-    return 0.0001
 
 
 def main() -> None:
@@ -192,10 +187,10 @@ def main() -> None:
         backtester = Backtester(
             confidence_threshold=args.confidence_threshold,
             max_holding_bars=backtest_cfg.get("max_holding_bars", 50),
-            spread_pips=backtest_cfg.get("spread_pips", 1.0),
+            spread_pips=resolve_spread_pips(backtest_cfg, args.symbol),
             slippage_pips=backtest_cfg.get("slippage_pips", 0.2),
             commission_pips=backtest_cfg.get("commission_pips", 0.0),
-            pip_size=_pip_size(args.symbol),
+            pip_size=pip_size(args.symbol),
         )
         trades = backtester.run(candles_by_tf["M15"], signals)
         trade_stats = summarize(trades)
@@ -222,6 +217,10 @@ def main() -> None:
             logger.info(
                 f"Fold {fold} riesgo: sharpe={trade_stats['sharpe']:.3f}, sortino={trade_stats['sortino']:.3f}, "
                 f"max_drawdown={trade_stats['max_drawdown_pct'] * 100:.2f}%"
+            )
+            logger.info(
+                f"Fold {fold} expectancy_r={trade_stats['expectancy_r']:.3f}, "
+                f"profit_factor={trade_stats['profit_factor']:.3f}"
             )
         else:
             logger.info(f"Fold {fold} BACKTEST: 0 operaciones")

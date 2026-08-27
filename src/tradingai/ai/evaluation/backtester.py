@@ -14,7 +14,44 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from tradingai.ai.data.features.indicators import add_indicators
+from tradingai.core.instruments import pip_size  # noqa: F401 -- reexportado, ver abajo
 from tradingai.core.signal import Direction, TradingSignal
+from tradingai.core.structure import last_confirmed_swing_high, last_confirmed_swing_low
+
+# Simbolos "major" (USD contra la otra divisa mas liquida de su categoria): en la
+# practica retail suelen tener el spread mas bajo/estable. Todo lo demas en la lista
+# de simbolos del piloto son pares cruzados (sin USD) -- tipicamente mas caros por
+# menor liquidez.
+_MAJOR_SYMBOLS = {"EURUSD", "GBPUSD", "USDJPY", "USDCAD", "AUDUSD", "NZDUSD", "USDCHF"}
+
+# Sin datos reales de spread por broker todavia (ver conversacion 2026-08-26): en vez
+# de un valor fijo unico para los 15 simbolos (subestima los cruces, que en retail
+# suelen costar mas que los majors por menor liquidez), se aplica un ajuste
+# CONSERVADOR por categoria. Actualizar `spread_pips_by_symbol` en config.yaml en
+# cuanto haya cifras reales del broker -- estos son solo un piso razonable, no una
+# medicion.
+_MAJOR_SPREAD_PIPS_DEFAULT = 1.0
+_CROSS_SPREAD_PIPS_DEFAULT = 2.0
+
+# `pip_size` vive ahora en `tradingai.core.instruments` (2026-08-27): tanto este
+# modulo (evaluacion/backtest) como `ai.inference.gbm_predictor` (piso minimo de SL
+# en vivo) lo necesitan, y ninguno de los dos debia depender del otro. Se reexporta
+# aca para no romper los scripts existentes (backtest.py/baseline_gbm.py/
+# walk_forward.py) que ya hacen `from tradingai.ai.evaluation.backtester import pip_size`.
+
+
+def default_spread_pips(symbol: str) -> float:
+    """Spread por defecto si no hay un valor real medido para este simbolo (ver
+    `spread_pips_by_symbol` en config.yaml)."""
+    return _MAJOR_SPREAD_PIPS_DEFAULT if symbol.upper() in _MAJOR_SYMBOLS else _CROSS_SPREAD_PIPS_DEFAULT
+
+
+def resolve_spread_pips(backtest_cfg: dict, symbol: str) -> float:
+    """Spread a usar para `symbol`: el medido en `spread_pips_by_symbol` (config.yaml)
+    si existe, si no el default conservador por categoria (`default_spread_pips`)."""
+    by_symbol = backtest_cfg.get("spread_pips_by_symbol") or {}
+    return by_symbol.get(symbol, default_spread_pips(symbol))
 
 
 @dataclass
@@ -34,6 +71,11 @@ class Backtester:
         slippage_pips: float = 0.2,
         commission_pips: float = 0.0,
         pip_size: float = 0.0001,
+        dynamic_exit: bool = False,
+        structure_swing_left: int = 3,
+        structure_swing_right: int = 3,
+        structure_lookback_candles: int = 100,
+        structure_bias_lookback_candles: int = 250,
     ) -> None:
         self.confidence_threshold = confidence_threshold
         self.max_holding_bars = max_holding_bars
@@ -42,6 +84,18 @@ class Backtester:
         # commission_pips es el equivalente en pips de la comision del broker (0 en
         # cuentas solo-spread; las cuentas ECN suelen cobrar comision aparte).
         self.cost_price = (spread_pips + slippage_pips + commission_pips) * pip_size
+        # Modo de validacion para la propuesta del 2026-08-27 (mt5.structure_exit):
+        # en vez de TP/SL fijos, cierra antes si el sesgo de EMAs se voltea en contra
+        # (misma feature que ve el modelo de entrada), y extiende el TP hacia el
+        # siguiente swing de estructura mientras el sesgo siga a favor. El SL se deja
+        # FIJO en ambos modos (la gestion de SL -- breakeven/trailing -- ya esta en
+        # vivo y se evalua por separado via los CSV de tracking, no aca) para aislar
+        # el efecto de ESTA propuesta especifica.
+        self.dynamic_exit = dynamic_exit
+        self.structure_swing_left = structure_swing_left
+        self.structure_swing_right = structure_swing_right
+        self.structure_lookback_candles = structure_lookback_candles
+        self.structure_bias_lookback_candles = structure_bias_lookback_candles
 
     def run(self, candles: pd.DataFrame, signals: list[tuple[int, TradingSignal]]) -> list[Trade]:
         """`signals` es una lista de (indice_en_candles, TradingSignal)."""
@@ -63,12 +117,56 @@ class Backtester:
             return None
 
         is_long = signal.direction == Direction.LONG
+        if self.dynamic_exit:
+            return self._simulate_trade_dynamic(candles, idx, future, signal, is_long)
+
         for _, bar in future.iterrows():
             hit_tp = bar["high"] >= signal.take_profit if is_long else bar["low"] <= signal.take_profit
             hit_sl = bar["low"] <= signal.stop_loss if is_long else bar["high"] >= signal.stop_loss
 
             if hit_tp:
                 return self._make_trade(signal, signal.take_profit, "tp", is_long)
+            if hit_sl:
+                return self._make_trade(signal, signal.stop_loss, "sl", is_long)
+
+        last_close = future["close"].iloc[-1]
+        return self._make_trade(signal, last_close, "timeout", is_long)
+
+    def _simulate_trade_dynamic(
+        self, candles: pd.DataFrame, idx: int, future: pd.DataFrame, signal: TradingSignal, is_long: bool
+    ) -> Trade | None:
+        """Replica `mt5.structure_exit` sobre historico: cierra antes si el sesgo se
+        invalida, o extiende el TP hacia el siguiente swing mientras el sesgo siga a
+        favor. El SL se evalua siempre contra el nivel FIJO original (ver
+        `dynamic_exit` en `__init__`)."""
+        direction = Direction.LONG if is_long else Direction.SHORT
+        current_tp = signal.take_profit
+
+        for offset, (_, bar) in enumerate(future.iterrows()):
+            abs_idx = idx + 1 + offset
+
+            bias_window = candles.iloc[max(0, abs_idx - self.structure_bias_lookback_candles + 1) : abs_idx + 1]
+            with_bias = add_indicators(bias_window, include=["ema"])
+            last_bias = with_bias.iloc[-1]
+            invalidated = last_bias["bias_bearish"] if is_long else last_bias["bias_bullish"]
+            if bool(invalidated):
+                return self._make_trade(signal, bar["close"], "estructura", is_long)
+
+            swing_window = candles.iloc[max(0, abs_idx - self.structure_lookback_candles + 1) : abs_idx + 1]
+            if is_long:
+                swing = last_confirmed_swing_high(swing_window, self.structure_swing_left, self.structure_swing_right)
+                if swing is not None and swing > current_tp and swing > bar["close"]:
+                    current_tp = swing
+            else:
+                swing = last_confirmed_swing_low(swing_window, self.structure_swing_left, self.structure_swing_right)
+                if swing is not None and swing < current_tp and swing < bar["close"]:
+                    current_tp = swing
+
+            hit_tp = bar["high"] >= current_tp if is_long else bar["low"] <= current_tp
+            hit_sl = bar["low"] <= signal.stop_loss if is_long else bar["high"] >= signal.stop_loss
+
+            if hit_tp:
+                return self._make_trade(signal, current_tp, "tp", is_long)
             if hit_sl:
                 return self._make_trade(signal, signal.stop_loss, "sl", is_long)
 
@@ -91,6 +189,17 @@ def summarize(trades: list[Trade]) -> dict:
     asumir una frecuencia de trading fija, que varia por simbolo/regimen) -- sirven
     para comparar la CALIDAD del retorno entre folds/simbolos con la misma unidad,
     no como un Sharpe de cartera clasico.
+
+    `expectancy_r` y `profit_factor` (2026-08-26): el % de aciertos aislado no dice
+    si el sistema es rentable -- un 40% de acierto puede ser muy bueno si se gana 2.5x
+    lo que se pierde. `expectancy_r` es el promedio de cuantas veces el riesgo
+    arriesgado se gana/pierde por operacion (pnl_pct / distancia_SL_pct de ESA
+    operacion, promediado) -- a diferencia de `avg_pnl_pct`, es comparable entre
+    simbolos/configs con distinta distancia de SL/ATR, que es justo lo que varia
+    entre los 15 simbolos del piloto. `profit_factor` = ganancia bruta / perdida
+    bruta; con 0 operaciones perdedoras da `inf` (caso real de muestras chicas: no
+    tratar un profit_factor altisimo con pocas operaciones como señal fuerte, ver
+    `n_trades` siempre junto a el).
     """
     if not trades:
         return {"n_trades": 0}
@@ -98,7 +207,22 @@ def summarize(trades: list[Trade]) -> dict:
     pnls = [t.pnl_pct for t in trades]
     n = len(pnls)
     wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
     mean_pnl = sum(pnls) / n
+
+    gross_profit = sum(wins)
+    gross_loss = -sum(losses)
+    if gross_loss > 0:
+        profit_factor = gross_profit / gross_loss
+    else:
+        profit_factor = float("inf") if gross_profit > 0 else 0.0
+
+    r_multiples = []
+    for t in trades:
+        risk_pct = abs(t.signal.entry_price - t.signal.stop_loss) / t.signal.entry_price
+        if risk_pct > 0:
+            r_multiples.append(t.pnl_pct / risk_pct)
+    expectancy_r = sum(r_multiples) / len(r_multiples) if r_multiples else 0.0
 
     variance = sum((p - mean_pnl) ** 2 for p in pnls) / n
     std_pnl = math.sqrt(variance)
@@ -127,4 +251,6 @@ def summarize(trades: list[Trade]) -> dict:
         "sharpe": sharpe,
         "sortino": sortino,
         "max_drawdown_pct": max_drawdown,
+        "expectancy_r": expectancy_r,
+        "profit_factor": profit_factor,
     }

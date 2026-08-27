@@ -5,14 +5,41 @@ trading:
   symbols: [
     "EURUSD", "GBPUSD", "USDJPY", "US500",
     "EURCAD", "EURAUD", "USDCAD", "AUDUSD", "GBPAUD", "GBPCAD",
-    "EURGBP", "EURJPY", "GBPJPY", "USDCHF", "NZDUSD",
+    "EURJPY", "GBPJPY", "USDCHF", "NZDUSD",
   ]
   # XAUUSD (oro) sacado del piloto el 2026-08-25 por decision explicita del usuario
   # tras un SL de -$960.21 -- el oro se mueve con una volatilidad/tamaño de punto muy
   # distinto al resto de pares FX, y el usuario prefirio no seguir operandolo por
   # ahora. Volver a incluirlo en la lista de arriba si se decide retomarlo.
+  #
+  # EURGBP sacado el 2026-08-27 (decision del manager tecnico, no del usuario a
+  # ciegas -- ver memoria del proyecto): 3 señales independientes en la misma
+  # direccion. (1) unico simbolo no promovido en el reentreno del 2026-08-26
+  # (2/4 folds, pnl medio -0.27%). (2) unico fold negativo en el walk-forward
+  # completo del 2026-08-25 (63/64 positivos). (3) peor simbolo del dia el
+  # 2026-08-26 (0/3 ganadas, pnl=-$476.15), con las 3 perdidas en confianza
+  # 90-93% -- el modelo esta confiadamente equivocado en este simbolo, no dudando,
+  # por lo que subir el umbral de confianza NO habria evitado esas perdidas
+  # (se evaluo esa alternativa y se descarto con datos, no a ojo).
   risk_per_trade_pct: 1.0
-  max_open_positions: 3
+  # Subido de 3 a 4 el 2026-08-27 (pedido explicito): con risk_per_trade_pct=1.0 y
+  # max_portfolio_risk_pct=10.0 mas abajo, 4 posiciones siguen muy por debajo del
+  # tope de VaR agregado (4% vs 10% en el peor caso). Este VALOR de aca es ahora la
+  # fuente de verdad real (bug real encontrado el mismo dia: antes lo leia
+  # `secrets.max_open_positions`/.env, y este valor de config.yaml no tenia ningun
+  # efecto -- ver run_live.py).
+  max_open_positions: 4
+  # Techo ALTO (no ilimitado) para señales de confianza muy alta que superen el
+  # limite normal de arriba -- pedido explicito del 2026-08-27 tras ver operaciones
+  # de 76-90% de confianza rechazadas solo por el limite de posiciones. Se decidio
+  # NO dejarlo sin techo (confianza alta no es lo mismo que "seguro": el modelo
+  # puede estar muy confiado y equivocado, y sin techo un dia con muchos simbolos
+  # confiados a la vez podria acumular exposicion correlacionada sin control). El
+  # resto de controles (VaR de portafolio, correlacion por divisa) se siguen
+  # aplicando igual a estas señales. null = sin excepcion (max_open_positions sigue
+  # siendo un techo absoluto).
+  max_open_positions_high_confidence: 6
+  high_confidence_override: 0.90
   max_margin_pct_per_trade: 10.0  # tope de margen por operacion (independiente del sizing por riesgo)
   max_daily_drawdown_pct: 5.0
   min_risk_reward_ratio: 2.0   # piso duro: la IA puede pedir mas, nunca menos (ver RiskManager)
@@ -77,10 +104,61 @@ trading:
     swing_right: 3
     swing_lookback_candles: 100
 
+  # Salida escalonada (2026-08-26, pedido explicito): cierra `close_fraction` del
+  # volumen al alcanzar un primer TP conservador situado a `tp1_fraction` del camino
+  # entre la entrada y el TP original, y deja el resto corriendo gestionado por el
+  # trailing stop de arriba -- ver tradingai.mt5.scaled_exit. Con el R:R por defecto
+  # (sl_atr_mult=2.0, tp_atr_mult=4.0) tp1_fraction=0.5 pone el primer TP en 1R, el
+  # mismo punto en el que se activa el trailing.
+  scaled_exit:
+    enabled: true
+    tp1_fraction: 0.5
+    close_fraction: 0.5
+    # 2026-08-26 (pedido explicito, tras ver en vivo un caso donde el cierre parcial
+    # no vino acompañado de ningun ajuste de SL porque el trailing todavia no
+    # encontraba una zona de estructura): si tras el cierre parcial el SL sigue peor
+    # que breakeven, se fuerza a breakeven. Si el trailing YA lo mejoro mas alla, no
+    # se toca -- nunca se afloja lo que el trailing ya movio.
+    move_sl_to_breakeven: true
+
+  # Gestion basada en estructura mas alla del TP/SL fijo (2026-08-27, pedido
+  # explicito del usuario: "que la ia aprenda a monitorear las operaciones... y
+  # cierre si la estructura cambia, o deje correr subiendo el tp"). Reutiliza la
+  # MISMA feature de sesgo (EMA20/50/200) que ya ve el modelo de entrada -- ver
+  # tradingai.mt5.structure_exit. El SL se deja intacto (lo gestiona
+  # trailing_stop/scaled_exit de arriba); esto solo decide CUANDO cerrar antes de
+  # tiempo o CUANTO extender el TP.
+  #
+  # Validado con backtest purgado antes de encender en vivo (scripts/
+  # backtest_structure_exit.py, mismo criterio que para cualquier cambio de
+  # entrada): 3204 operaciones sobre EURUSD/GBPJPY/GBPAUD/USDCHF, expectancy_r
+  # promedio 0.450 (estatico) -> 1.087 (dinamico), mejora consistente en los 4
+  # simbolos sin excepcion (profit_factor tambien mejora en los 4). No se
+  # modelo el trailing/breakeven ya en vivo dentro de ese backtest (se aislo el
+  # efecto de ESTA propuesta especifica) -- se sigue trackeando en produccion via
+  # logs/live/structure_exit_trades.csv para confirmar que se sostiene.
+  structure_exit:
+    enabled: true
+    swing_left: 3
+    swing_right: 3
+    swing_lookback_candles: 100
+    bias_lookback_candles: 250
+
 backtest:
-  # Costes de ida y vuelta por operacion (ver Backtester). Valores por defecto tipicos
-  # de una cuenta retail en EURUSD; ajustar segun el broker/simbolo real.
-  spread_pips: 1.0
+  # Costes de ida y vuelta por operacion (ver Backtester). El spread YA NO es un
+  # valor fijo unico para los 15 simbolos (subestimaba los pares cruzados, que en
+  # retail suelen costar mas que los majors por menor liquidez) -- ver
+  # `spread_pips_by_symbol` abajo. slippage/comision si se mantienen fijos: no hay
+  # evidencia todavia de que varien por simbolo de forma tan clara como el spread.
+  #
+  # 2026-08-26: se intento medir el spread real via MT5, pero la cuenta demo muestra
+  # spreads casi nulos (0.0-0.3 pips) en la mayoria de simbolos -- no representativo
+  # de una cuenta real, y usarlo habria hecho el backtest MAS optimista, no mas
+  # realista. Pendiente: reemplazar por cifras reales del broker cuando se tengan
+  # (ver [[project-tradingai-roadmap]]).
+  spread_pips_by_symbol: {}
+    # EURUSD: 1.0
+    # GBPAUD: 2.5
   slippage_pips: 0.2
   commission_pips: 0.0          # 0 en cuentas solo-spread; las ECN suelen cobrar aparte
   max_holding_bars: 50
@@ -158,6 +236,15 @@ model:
   # ambos mantiene el ratio 2:1 pero da paradas mas propias de day-trading.
   sl_atr_mult: 2.0
   tp_atr_mult: 4.0
+
+  # Piso minimo absoluto de distancia del SL, en pips (2026-08-27): evidencia real
+  # de 3 dias de piloto en vivo -- las operaciones que quedaron con un SL por ATR
+  # menor a ~8 pips ganaron 1/8 (-$1178.89), contra 8/18 (+$493.61) en el resto.
+  # Cuando el ATR momentaneo es muy bajo, sl_atr_mult puede dar un SL demasiado
+  # corto -- este piso lo evita, escalando el TP proporcionalmente para no alterar
+  # el risk:reward configurado (ver tradingai.core.instruments.compute_sl_tp_with_floor).
+  # No aplica a indices (US500): "pips" de forex no es una unidad valida ahi.
+  min_sl_pips: 12.0
 
   # Cabezas de prediccion del modelo
   outputs:
