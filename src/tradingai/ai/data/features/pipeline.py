@@ -7,6 +7,7 @@ import pandas as pd
 from tradingai.ai.data.features import (
     divergence,
     elliott,
+    fibonacci,
     gaps,
     indicators,
     market_structure,
@@ -59,6 +60,10 @@ def build_feature_pipeline(df: pd.DataFrame, config: dict) -> pd.DataFrame:
             tolerance_pct=smc_cfg.get("liquidity_sweep_tolerance_pct", 0.05),
         )
         out = smc.premium_discount_zone(out, lookback=smc_cfg.get("ob_lookback", 50))
+
+    fib_cfg = features_cfg.get("fibonacci", {})
+    if fib_cfg.get("enabled", True):
+        out = fibonacci.compute_ote_zone(out, lookback=fib_cfg.get("lookback", 100))
 
     fvg_cfg = features_cfg.get("fvg", {})
     if fvg_cfg.get("enabled", True):

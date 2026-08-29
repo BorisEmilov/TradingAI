@@ -96,7 +96,10 @@ def retrain_symbol(symbol: str, confidence_threshold: float, thermal_args: list[
 
     if promote:
         logger.info(f"[{symbol}] PROMOVIDO: reentrenando checkpoint de produccion")
-        train = _run([sys.executable, "scripts/train_gbm.py", "--symbol", symbol])
+        # thermal_args tambien aca -- bug real 2026-08-29, train_gbm.py entrenaba
+        # este paso sin ningun limite de hilos ni pausa termica (ver su propio
+        # docstring de argumento).
+        train = _run([sys.executable, "scripts/train_gbm.py", "--symbol", symbol, *thermal_args[:4]])
         if train.returncode != 0:
             logger.error(f"[{symbol}] Fallo al reentrenar el checkpoint final:\n{train.stderr}")
             return {"symbol": symbol, "folds": folds, "promoted": False, "error": "train_failed"}

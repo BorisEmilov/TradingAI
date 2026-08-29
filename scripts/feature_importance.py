@@ -85,8 +85,17 @@ class _EnsembleWrapper:
         return self.classes_[np.argmax(probs, axis=1)]
 
 
-def _accuracy_scoring(estimator, X, y) -> float:
-    return float((estimator.predict(X) == y).mean())
+def _make_accuracy_scoring(max_temp_c: float):
+    # permutation_importance llama al scoring cientos de veces (n_repeats x
+    # n_features) en un solo bloque sin retornar el control -- sin este chequeo
+    # aca, el unico gate termico era el de entrenar el ensemble, y esta fase (mas
+    # larga) corria completamente sin proteccion. Bug real encontrado en vivo el
+    # 2026-08-29: 94-95C sostenido, mismo patron que el gap de train_gbm.py.
+    def _accuracy_scoring(estimator, X, y) -> float:
+        wait_for_safe_temp(max_temp_c=max_temp_c)
+        return float((estimator.predict(X) == y).mean())
+
+    return _accuracy_scoring
 
 
 def main() -> None:
@@ -144,12 +153,13 @@ def main() -> None:
             m.fit(X_train, y_train)
             models.append(m)
     ensemble = _EnsembleWrapper(models)
+    scoring = _make_accuracy_scoring(args.max_temp_c)
 
-    baseline_acc = _accuracy_scoring(ensemble, X_test, y_test)
+    baseline_acc = scoring(ensemble, X_test, y_test)
     logger.info(f"[{args.symbol}] Accuracy fuera de muestra: {baseline_acc * 100:.1f}%")
 
     result = permutation_importance(
-        ensemble, X_test, y_test, n_repeats=args.n_repeats, random_state=42, scoring=_accuracy_scoring,
+        ensemble, X_test, y_test, n_repeats=args.n_repeats, random_state=42, scoring=scoring,
     )
 
     column_names = [f"{tf}_{col}" for tf in TIMEFRAMES for col in feature_columns]

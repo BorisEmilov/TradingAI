@@ -13,7 +13,7 @@ import argparse
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -41,6 +41,24 @@ from tradingai.utils.logging import setup_logging  # noqa: E402
 from loguru import logger  # noqa: E402
 
 RETRY_SECONDS = 15
+
+
+def _within_trading_hours_now(trading_hours_utc: tuple[int, int] | None) -> bool:
+    """Mismo criterio que RiskManager._within_trading_hours, pero contra la hora
+    ACTUAL en vez de la de un signal -- para no correr la prediccion completa
+    (fetch de 4 temporalidades + ensemble GBM) en ciclos que se van a rechazar de
+    todos modos. Antes de esto, los 14 procesos calculaban una prediccion cada 15
+    min tambien fuera de horario (ej. toda la sesion asiatica en solitario) solo
+    para descartarla en RiskManager -- CPU/calor desperdiciado sin ningun efecto en
+    que se abra o no una operacion (esa logica no cambia, sigue en RiskManager).
+    """
+    if trading_hours_utc is None:
+        return True
+    start, end = trading_hours_utc
+    hour = datetime.now(timezone.utc).hour
+    if start <= end:
+        return start <= hour < end
+    return hour >= start or hour < end
 
 
 def _maybe_trail_stop(
@@ -228,11 +246,15 @@ def _maybe_close_on_structure_invalidation(
     position: dict,
     structure_exit_config: dict,
     trades_log_path: str | None,
+    cooldown_state: dict | None = None,
+    opened_at: datetime | None = None,
 ) -> bool:
-    """Cierra la posicion completa si el sesgo de EMAs (misma feature que ve el
-    modelo de entrada) ya se volteo en contra de la direccion de la operacion -- la
-    estructura que justifico la entrada ya no existe, no hace falta esperar a que el
-    precio llegue al SL fijo. Ver tradingai.mt5.structure_exit.
+    """Cierra la posicion completa si la secuencia de swings (estructura de precio
+    real, ver `core.structure`) se rompio en contra de la direccion de la operacion
+    -- no hace falta esperar a que el precio llegue al SL fijo. Redefinido el
+    2026-08-28 (antes usaba el apilamiento de EMA20/50/200, pedido explicito del
+    usuario de usar estructura de velas real en vez de una media movil). Ver
+    tradingai.mt5.structure_exit.
 
     Validado con backtest purgado antes de encenderse en vivo (ver
     scripts/backtest_structure_exit.py, 2026-08-27): expectancy_r 0.45 -> 1.09 sobre
@@ -240,12 +262,38 @@ def _maybe_close_on_structure_invalidation(
 
     Devuelve True si cerro la posicion -- el llamador debe saltarse el resto de la
     gestion de ESTE ticket en el mismo ciclo (ya no existe).
+
+    Si se pasa `cooldown_state` (dict compartido con el bucle principal de este
+    mismo proceso, ver `main()`), marca la hora del cierre para que no se vuelva a
+    abrir en este simbolo por un rato -- caso real del 2026-08-27: AUDUSD reabrio la
+    misma apuesta (short) 6 veces en unas horas contra un sesgo alcista estable, y
+    cada reapertura pagaba spread de nuevo solo para cerrarse casi al instante otra
+    vez. El cierre en si ya es barato (spread, no el SL completo) -- esto evita
+    pagarlo repetidas veces mientras el desacuerdo modelo/estructura no cambia.
+
+    `opened_at` acota cuando se permite evaluar esto -- bug real encontrado en vivo
+    el 2026-08-28: el watcher sondea cada 30s, asi que el PRIMER chequeo tras abrir
+    puede caer sobre la MISMA vela M15 que genero la señal de entrada (la siguiente
+    vela todavia no cierra). Eso no es "la estructura cambio", es que el sesgo ya
+    estaba en contra desde el primer momento -- el backtest de validacion NUNCA
+    probo ese caso (`_simulate_trade_dynamic` siempre arranca en la vela SIGUIENTE a
+    la entrada, nunca en la misma). Se exige al menos `min_hold_minutes` desde que
+    se vio la posicion por primera vez (una vela M15 nueva) antes de poder invalidar
+    por estructura, para igualar lo que realmente se valido.
     """
     ticket = position["ticket"]
+    min_hold_minutes = structure_exit_config.get("min_hold_minutes", 15)
+    if opened_at is not None and datetime.now(timezone.utc) - opened_at < timedelta(minutes=min_hold_minutes):
+        return False
+
     try:
         direction = Direction.LONG if position["type"] == "buy" else Direction.SHORT
-        candles = connector.get_candles(symbol, "M15", structure_exit_config.get("bias_lookback_candles", 250))
-        invalidated = structure_invalidated(candles, direction)
+        candles = connector.get_candles(symbol, "M15", structure_exit_config.get("swing_lookback_candles", 100))
+        invalidated = structure_invalidated(
+            candles, direction,
+            swing_left=structure_exit_config.get("swing_left", 3),
+            swing_right=structure_exit_config.get("swing_right", 3),
+        )
     except Exception:
         logger.exception(f"[{symbol}] Error evaluando invalidacion de estructura para ticket {ticket}")
         return False
@@ -258,6 +306,10 @@ def _maybe_close_on_structure_invalidation(
     except Exception:
         logger.exception(f"[{symbol}] Error cerrando por invalidacion de estructura ticket {ticket}")
         return False
+
+    if cooldown_state is not None:
+        cooldown_minutes = structure_exit_config.get("reentry_cooldown_minutes", 30)
+        cooldown_state["until"] = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
 
     logger.info(f"[{symbol}] CIERRE POR ESTRUCTURA (sesgo invalidado) ticket={ticket}")
     if trades_log_path:
@@ -332,6 +384,9 @@ def _position_watcher_loop(
     trailing_config: dict | None = None,
     scaled_exit_config: dict | None = None,
     structure_exit_config: dict | None = None,
+    structure_cooldown_state: dict | None = None,
+    loss_breaker_config: dict | None = None,
+    consecutive_loss_state: dict | None = None,
 ) -> None:
     """Detecta cierres de posiciones (SL/TP ejecutado por el broker) que no pasan por
     `TradingPipeline.run_once()` -- este puede tardar hasta un ciclo de vela en
@@ -347,6 +402,12 @@ def _position_watcher_loop(
     # puede cambiar (trailing, o breakeven tras cierre parcial) sin que eso deba
     # alterar el "1R" que activa el trailing (ver tradingai.mt5.trailing_stop).
     entry_risk_by_ticket: dict[int, float] = {}
+    # Hora en que este proceso vio cada ticket por primera vez -- proxy de la hora de
+    # apertura (el watcher sondea cada `poll_seconds`, asi que el margen de error es
+    # ese, insignificante frente al `min_hold_minutes` de mas abajo). Usado para no
+    # evaluar invalidacion de estructura sobre la MISMA vela que genero la entrada --
+    # ver docstring de _maybe_close_on_structure_invalidation (bug real 2026-08-28).
+    opened_at_by_ticket: dict[int, datetime] = {}
 
     try:
         initial_positions = [p for p in connector.get_open_positions() if p["symbol"] == symbol]
@@ -357,6 +418,7 @@ def _position_watcher_loop(
     for p in initial_positions:
         if p.get("sl"):
             entry_risk_by_ticket[p["ticket"]] = abs(p["price_open"] - p["sl"])
+        opened_at_by_ticket[p["ticket"]] = datetime.now(timezone.utc)
 
     while not stop_event.wait(poll_seconds):
         try:
@@ -369,9 +431,12 @@ def _position_watcher_loop(
         for position in open_positions:
             if position["ticket"] not in entry_risk_by_ticket and position.get("sl"):
                 entry_risk_by_ticket[position["ticket"]] = abs(position["price_open"] - position["sl"])
+            if position["ticket"] not in opened_at_by_ticket:
+                opened_at_by_ticket[position["ticket"]] = datetime.now(timezone.utc)
 
         for ticket in known_tickets - current_tickets:
             entry_risk_by_ticket.pop(ticket, None)
+            opened_at_by_ticket.pop(ticket, None)
             profit, close_price = None, None
             try:
                 deals = connector.get_position_history(ticket)
@@ -392,10 +457,39 @@ def _position_watcher_loop(
                     profit=profit,
                 )
 
-        if structure_exit_config and structure_exit_config.get("enabled"):
+            if loss_breaker_config and loss_breaker_config.get("enabled") and consecutive_loss_state is not None and profit is not None:
+                if profit < 0:
+                    consecutive_loss_state["count"] += 1
+                    max_losses = loss_breaker_config.get("max_consecutive_losses", 3)
+                    if consecutive_loss_state["count"] >= max_losses:
+                        cooldown_minutes = loss_breaker_config.get("cooldown_minutes", 120)
+                        consecutive_loss_state["until"] = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
+                        logger.warning(
+                            f"[{symbol}] CORTACIRCUITO: {consecutive_loss_state['count']} perdidas consecutivas seguidas, "
+                            f"pausando entradas nuevas hasta {consecutive_loss_state['until']}"
+                        )
+                elif profit > 0:
+                    consecutive_loss_state["count"] = 0
+
+        # Cierre anticipado por invalidacion de estructura: PAUSADO el 2026-08-28 con
+        # datos en vivo (14 cierres, -$332 realizado; de los 10 que no habrian tocado
+        # su SL, dejarlos correr mostraria +$2600 combinados ahora mismo) -- el
+        # backtest del 27 mostro mejora agregada, pero la evidencia en vivo de hoy la
+        # contradice. Se apaga con `invalidation_close_enabled: false` sin tocar la
+        # extension de TP (sin este riesgo, solo aleja el TP, nunca cierra antes de
+        # tiempo) mientras se hace el analisis mas riguroso del fin de semana sobre
+        # los 10 simbolos que todavia no se validaron.
+        if (
+            structure_exit_config
+            and structure_exit_config.get("enabled")
+            and structure_exit_config.get("invalidation_close_enabled", True)
+        ):
             closed_by_structure = set()
             for position in open_positions:
-                if _maybe_close_on_structure_invalidation(connector, symbol, position, structure_exit_config, trades_log_path):
+                if _maybe_close_on_structure_invalidation(
+                    connector, symbol, position, structure_exit_config, trades_log_path, structure_cooldown_state,
+                    opened_at_by_ticket.get(position["ticket"]),
+                ):
                     closed_by_structure.add(position["ticket"])
             if closed_by_structure:
                 # Ya no existen -- se saltan del resto de la gestion de este mismo
@@ -493,7 +587,21 @@ def main() -> None:
             connector, predictor, risk_manager, executor,
             confidence_threshold=config["model"]["outputs"].get("confidence_threshold", 0.6),
         )
-        watcher = CandleCloseWatcher(connector, args.symbol, ANCHOR_TIMEFRAME)
+        candle_state_file = Path(config["paths"]["logs_dir"]) / "live" / ".candle_state" / f"{args.symbol}.txt"
+        watcher = CandleCloseWatcher(connector, args.symbol, ANCHOR_TIMEFRAME, state_file=candle_state_file)
+
+        # Compartido con el watcher (mismo proceso, un solo hilo por simbolo): marca
+        # hasta cuando no reabrir tras un cierre por invalidacion de estructura -- ver
+        # docstring de _maybe_close_on_structure_invalidation (caso real AUDUSD
+        # 2026-08-27, reabria la misma apuesta perdedora cada 15-20 min).
+        structure_cooldown_state: dict = {"until": None}
+
+        # Cortacircuito por perdidas consecutivas (2026-08-28, caso real EURJPY:
+        # 7 aperturas seguidas en el mismo dia, todas en la misma direccion, -$317
+        # neto) -- a diferencia del cooldown de arriba (especifico del cierre por
+        # estructura), este cuenta CUALQUIER cierre en perdida seguido, sin importar
+        # el motivo (SL, estructura, lo que sea). Se resetea con una ganancia.
+        consecutive_loss_state: dict = {"count": 0, "until": None}
 
         stop_event = threading.Event()
         watcher_thread = threading.Thread(
@@ -503,6 +611,9 @@ def main() -> None:
                 "trailing_config": config["trading"].get("trailing_stop"),
                 "scaled_exit_config": config["trading"].get("scaled_exit"),
                 "structure_exit_config": config["trading"].get("structure_exit"),
+                "structure_cooldown_state": structure_cooldown_state,
+                "loss_breaker_config": config["trading"].get("consecutive_loss_breaker"),
+                "consecutive_loss_state": consecutive_loss_state,
             },
             daemon=True,
         )
@@ -513,6 +624,17 @@ def main() -> None:
             while True:
                 try:
                     watcher.wait_for_new_candle()
+                    cooldown_until = structure_cooldown_state.get("until")
+                    if cooldown_until is not None and datetime.now(timezone.utc) < cooldown_until:
+                        logger.debug(f"[{args.symbol}] En cooldown tras cierre por estructura hasta {cooldown_until}, se salta este ciclo")
+                        continue
+                    loss_breaker_until = consecutive_loss_state.get("until")
+                    if loss_breaker_until is not None and datetime.now(timezone.utc) < loss_breaker_until:
+                        logger.debug(f"[{args.symbol}] Cortacircuito activo por perdidas consecutivas hasta {loss_breaker_until}, se salta este ciclo")
+                        continue
+                    if not _within_trading_hours_now(tuple(trading_hours) if trading_hours else None):
+                        logger.debug(f"[{args.symbol}] Fuera del horario permitido {trading_hours} UTC, no se calcula prediccion este ciclo")
+                        continue
                     pipeline.run_once(args.symbol)
                 except requests.exceptions.RequestException:
                     # El bridge puede caerse un momento (reinicio para cargar codigo

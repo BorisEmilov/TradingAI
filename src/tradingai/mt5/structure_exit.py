@@ -1,45 +1,64 @@
-"""Gestion de salida basada en estructura, mas alla de un TP/SL fijo (2026-08-27).
+"""Gestion de salida basada en estructura, mas alla de un TP/SL fijo (2026-08-27,
+redefinido 2026-08-28).
 
-Dos mecanismos, ambos reutilizando la MISMA feature de sesgo (`bias_bullish`/
-`bias_bearish`, alineacion de EMA20/50/200) que ya ve el modelo de entrada -- ver
-`ai.data.features.indicators.add_indicators()`. No es un componente de decision
-nuevo: es la misma señal de estructura que ya se entrena y valida, aplicada tambien
-a operaciones ya abiertas en vez de solo a la entrada.
+Dos mecanismos, ambos basados en la MISMA deteccion de swings confirmados
+(`core.structure`) que ya usa el trailing stop -- estructura de precio real (maximos
+y minimos confirmados por velas), no un indicador derivado como una media movil.
+La primera version (2026-08-27) usaba el apilamiento de EMA20/50/200 para decidir
+"sigue a favor la estructura?"; se reemplazo el mismo dia por pedido explicito del
+usuario ("tenemos que enfocarnos en estructura de velas y estructura general no
+medias moviles") -- una media de 200 periodos es lenta y no es estructura de precio,
+es un promedio.
 
-1. `structure_invalidated`: si el sesgo del simbolo se voltea en contra de la
-   direccion de la operacion, la estructura que justifico la entrada ya no existe --
-   permite cerrar antes de esperar a que el precio llegue al SL fijo.
-2. `compute_dynamic_take_profit`: si el sesgo se mantiene a favor y aparece un swing
-   de estructura mas alla del TP actual, extiende el TP (ratchet, nunca lo acerca) en
-   vez de cerrar en un multiplo fijo de riesgo -- deja correr al ganador mientras la
-   estructura lo respalde, permitiendo 1:3/1:4 sin renunciar al piso de 1:2 (el TP
-   original nunca se acerca, solo se aleja).
+1. `structure_invalidated`: ruptura de estructura (Break of Structure / Change of
+   Character) -- si el ultimo swing confirmado en contra de la operacion es MAS
+   extremo que el swing confirmado anterior (un minimo mas bajo estando en largo, o
+   un maximo mas alto estando en corto), la secuencia de estructura que sostenia la
+   operacion se rompio. Permite cerrar antes de esperar a que el precio llegue al SL
+   fijo.
+2. `compute_dynamic_take_profit`: si aparece un swing de estructura mas alla del TP
+   actual, lo extiende (ratchet, nunca lo acerca) en vez de cerrar en un multiplo
+   fijo de riesgo -- deja correr al ganador mientras la estructura lo respalde,
+   permitiendo 1:3/1:4 sin renunciar al piso de 1:2 (el TP original nunca se acerca,
+   solo se aleja). Sin cambios respecto a la version anterior.
 """
 
 from __future__ import annotations
 
 import pandas as pd
 
-from tradingai.ai.data.features.indicators import add_indicators
 from tradingai.core.signal import Direction
-from tradingai.core.structure import last_confirmed_swing_high, last_confirmed_swing_low
+from tradingai.core.structure import (
+    confirmed_swing_highs,
+    confirmed_swing_lows,
+    last_confirmed_swing_high,
+    last_confirmed_swing_low,
+)
 
 
-def structure_invalidated(candles: pd.DataFrame, direction: Direction) -> bool:
-    """True si el sesgo de EMAs ya se volteo EN CONTRA de la direccion de la
-    operacion en la ultima vela cerrada.
+def structure_invalidated(
+    candles: pd.DataFrame, direction: Direction, swing_left: int = 3, swing_right: int = 3
+) -> bool:
+    """True si la secuencia de swings se rompio EN CONTRA de la direccion de la
+    operacion -- un minimo mas bajo que el minimo confirmado anterior estando en
+    largo (o un maximo mas alto que el anterior estando en corto).
 
-    Solo un sesgo contrario claro (bullish/bearish) invalida -- `bias_neutral`
-    (EMAs no alineadas con claridad, ej. rango) NO cierra la operacion; exigir un
-    sesgo opuesto explicito evita cerrar por ruido en cuanto el precio se aplana un
-    momento.
+    Necesita al menos 2 swings confirmados del lado relevante para poder comparar --
+    si todavia no hay suficiente estructura formada, no invalida (no hay evidencia
+    de ruptura, no asumir la peor).
     """
-    with_bias = add_indicators(candles, include=["ema"])
-    last = with_bias.iloc[-1]
     if direction == Direction.LONG:
-        return bool(last["bias_bearish"])
+        lows = confirmed_swing_lows(candles, swing_left, swing_right, count=2)
+        if len(lows) < 2:
+            return False
+        return lows[-1] < lows[-2]
+
     if direction == Direction.SHORT:
-        return bool(last["bias_bullish"])
+        highs = confirmed_swing_highs(candles, swing_left, swing_right, count=2)
+        if len(highs) < 2:
+            return False
+        return highs[-1] > highs[-2]
+
     return False
 
 

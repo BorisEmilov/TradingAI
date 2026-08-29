@@ -123,26 +123,58 @@ trading:
 
   # Gestion basada en estructura mas alla del TP/SL fijo (2026-08-27, pedido
   # explicito del usuario: "que la ia aprenda a monitorear las operaciones... y
-  # cierre si la estructura cambia, o deje correr subiendo el tp"). Reutiliza la
-  # MISMA feature de sesgo (EMA20/50/200) que ya ve el modelo de entrada -- ver
+  # cierre si la estructura cambia, o deje correr subiendo el tp"). Ver
   # tradingai.mt5.structure_exit. El SL se deja intacto (lo gestiona
   # trailing_stop/scaled_exit de arriba); esto solo decide CUANDO cerrar antes de
   # tiempo o CUANTO extender el TP.
   #
-  # Validado con backtest purgado antes de encender en vivo (scripts/
-  # backtest_structure_exit.py, mismo criterio que para cualquier cambio de
-  # entrada): 3204 operaciones sobre EURUSD/GBPJPY/GBPAUD/USDCHF, expectancy_r
-  # promedio 0.450 (estatico) -> 1.087 (dinamico), mejora consistente en los 4
-  # simbolos sin excepcion (profit_factor tambien mejora en los 4). No se
-  # modelo el trailing/breakeven ya en vivo dentro de ese backtest (se aislo el
-  # efecto de ESTA propuesta especifica) -- se sigue trackeando en produccion via
-  # logs/live/structure_exit_trades.csv para confirmar que se sostiene.
+  # HISTORIAL de invalidation_close_enabled (ver [[project-structure-exit]]):
+  # - 2026-08-27: version original basada en apilamiento de EMA20/50/200. Backtest
+  #   (3204 operaciones EURUSD/GBPJPY/GBPAUD/USDCHF): expectancy_r 0.450 -> 1.087.
+  # - 2026-08-28 manana: PAUSADA -- evidencia en vivo mostro que cortaba mas ganancia
+  #   de la que evitaba en perdida (14 cierres, -$332 realizado; los 10 que no habrian
+  #   tocado SL mostraban +$2600 combinados si se dejaban correr).
+  # - 2026-08-28 tarde: REDEFINIDA -- el usuario objeto (con razon) que EMAs es un
+  #   indicador retail, no estructura real. Reemplazada por ruptura de estructura
+  #   autentica (Break of Structure/Change of Character sobre swings confirmados,
+  #   mismo codigo que ya usa el trailing stop). Backtest con la nueva definicion,
+  #   misma muestra: expectancy_r 0.450 -> 1.053 (comparable). REACTIVADA para
+  #   recolectar datos en vivo y decidir con evidencia fresca, no solo con backtest
+  #   (la leccion de la manana: backtest fuerte no garantiza resultado en vivo).
   structure_exit:
     enabled: true
+    invalidation_close_enabled: true
     swing_left: 3
     swing_right: 3
     swing_lookback_candles: 100
-    bias_lookback_candles: 250
+    # Anadido el 2026-08-28 (bug real encontrado por el usuario): el watcher sondea
+    # cada 30s, asi que sin este piso el cierre por estructura podia evaluarse sobre
+    # la MISMA vela M15 que genero la señal de entrada, segundos despues de abrir --
+    # eso no es "la estructura cambio", es que nunca estuvo a favor. El backtest de
+    # validacion (scripts/backtest_structure_exit.py) siempre revisa desde la vela
+    # SIGUIENTE a la entrada, nunca la misma -- este piso iguala eso en vivo.
+    min_hold_minutes: 15
+    # Anadido el mismo dia (caso real AUDUSD): el modelo de entrada reabrio el MISMO
+    # short 6 veces en unas horas contra un sesgo de EMAs establemente alcista,
+    # pagando spread cada vez solo para cerrarse casi al instante otra vez por este
+    # mismo mecanismo. No cambia el modelo ni el simbolo -- solo evita reabrir en
+    # este simbolo hasta que pasen unas velas y el desacuerdo tenga chance de
+    # resolverse. Ver _maybe_close_on_structure_invalidation en run_live.py.
+    reentry_cooldown_minutes: 30
+
+  # Cortacircuito por perdidas consecutivas (2026-08-28, caso real EURJPY: 7
+  # aperturas seguidas en un solo dia, todas short, -$317 neto, incluyendo un SL
+  # completo de -$254 al final). A diferencia del cooldown de structure_exit
+  # (especifico de ese mecanismo), este cuenta CUALQUIER cierre en perdida seguido
+  # sin importar el motivo -- si un simbolo encadena `max_consecutive_losses`
+  # perdidas, pausa entradas nuevas en ESE simbolo por `cooldown_minutes`. Se
+  # resetea el contador con la primera ganancia. No cambia el modelo ni gestiona
+  # posiciones ya abiertas -- solo evita seguir insistiendo en la misma apuesta
+  # perdedora el mismo dia.
+  consecutive_loss_breaker:
+    enabled: true
+    max_consecutive_losses: 3
+    cooldown_minutes: 120
 
 backtest:
   # Costes de ida y vuelta por operacion (ver Backtester). El spread YA NO es un

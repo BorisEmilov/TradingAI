@@ -14,10 +14,14 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from tradingai.ai.data.features.indicators import add_indicators
 from tradingai.core.instruments import pip_size  # noqa: F401 -- reexportado, ver abajo
 from tradingai.core.signal import Direction, TradingSignal
-from tradingai.core.structure import last_confirmed_swing_high, last_confirmed_swing_low
+from tradingai.core.structure import (
+    confirmed_swing_highs,
+    confirmed_swing_lows,
+    last_confirmed_swing_high,
+    last_confirmed_swing_low,
+)
 
 # Simbolos "major" (USD contra la otra divisa mas liquida de su categoria): en la
 # practica retail suelen tener el spread mas bajo/estable. Todo lo demas en la lista
@@ -75,7 +79,6 @@ class Backtester:
         structure_swing_left: int = 3,
         structure_swing_right: int = 3,
         structure_lookback_candles: int = 100,
-        structure_bias_lookback_candles: int = 250,
     ) -> None:
         self.confidence_threshold = confidence_threshold
         self.max_holding_bars = max_holding_bars
@@ -84,18 +87,19 @@ class Backtester:
         # commission_pips es el equivalente en pips de la comision del broker (0 en
         # cuentas solo-spread; las cuentas ECN suelen cobrar comision aparte).
         self.cost_price = (spread_pips + slippage_pips + commission_pips) * pip_size
-        # Modo de validacion para la propuesta del 2026-08-27 (mt5.structure_exit):
-        # en vez de TP/SL fijos, cierra antes si el sesgo de EMAs se voltea en contra
-        # (misma feature que ve el modelo de entrada), y extiende el TP hacia el
-        # siguiente swing de estructura mientras el sesgo siga a favor. El SL se deja
-        # FIJO en ambos modos (la gestion de SL -- breakeven/trailing -- ya esta en
-        # vivo y se evalua por separado via los CSV de tracking, no aca) para aislar
-        # el efecto de ESTA propuesta especifica.
+        # Modo de validacion para mt5.structure_exit: en vez de TP/SL fijos, cierra
+        # antes si la secuencia de swings se rompe en contra (Break of
+        # Structure/Change of Character, ver core.structure -- redefinido el
+        # 2026-08-28, antes usaba el apilamiento de EMA20/50/200 por pedido explicito
+        # del usuario de usar estructura de velas real en vez de una media movil), y
+        # extiende el TP hacia el siguiente swing mientras la estructura siga a
+        # favor. El SL se deja FIJO en ambos modos (la gestion de SL --
+        # breakeven/trailing -- ya esta en vivo y se evalua por separado via los CSV
+        # de tracking, no aca) para aislar el efecto de ESTA propuesta especifica.
         self.dynamic_exit = dynamic_exit
         self.structure_swing_left = structure_swing_left
         self.structure_swing_right = structure_swing_right
         self.structure_lookback_candles = structure_lookback_candles
-        self.structure_bias_lookback_candles = structure_bias_lookback_candles
 
     def run(self, candles: pd.DataFrame, signals: list[tuple[int, TradingSignal]]) -> list[Trade]:
         """`signals` es una lista de (indice_en_candles, TradingSignal)."""
@@ -135,24 +139,24 @@ class Backtester:
     def _simulate_trade_dynamic(
         self, candles: pd.DataFrame, idx: int, future: pd.DataFrame, signal: TradingSignal, is_long: bool
     ) -> Trade | None:
-        """Replica `mt5.structure_exit` sobre historico: cierra antes si el sesgo se
-        invalida, o extiende el TP hacia el siguiente swing mientras el sesgo siga a
-        favor. El SL se evalua siempre contra el nivel FIJO original (ver
-        `dynamic_exit` en `__init__`)."""
-        direction = Direction.LONG if is_long else Direction.SHORT
+        """Replica `mt5.structure_exit` sobre historico: cierra antes si la
+        secuencia de swings se rompe en contra (BOS/CHoCH), o extiende el TP hacia
+        el siguiente swing mientras la estructura siga a favor. El SL se evalua
+        siempre contra el nivel FIJO original (ver `dynamic_exit` en `__init__`)."""
         current_tp = signal.take_profit
 
         for offset, (_, bar) in enumerate(future.iterrows()):
             abs_idx = idx + 1 + offset
-
-            bias_window = candles.iloc[max(0, abs_idx - self.structure_bias_lookback_candles + 1) : abs_idx + 1]
-            with_bias = add_indicators(bias_window, include=["ema"])
-            last_bias = with_bias.iloc[-1]
-            invalidated = last_bias["bias_bearish"] if is_long else last_bias["bias_bullish"]
-            if bool(invalidated):
-                return self._make_trade(signal, bar["close"], "estructura", is_long)
-
             swing_window = candles.iloc[max(0, abs_idx - self.structure_lookback_candles + 1) : abs_idx + 1]
+
+            if is_long:
+                recent_lows = confirmed_swing_lows(swing_window, self.structure_swing_left, self.structure_swing_right, count=2)
+                invalidated = len(recent_lows) >= 2 and recent_lows[-1] < recent_lows[-2]
+            else:
+                recent_highs = confirmed_swing_highs(swing_window, self.structure_swing_left, self.structure_swing_right, count=2)
+                invalidated = len(recent_highs) >= 2 and recent_highs[-1] > recent_highs[-2]
+            if invalidated:
+                return self._make_trade(signal, bar["close"], "estructura", is_long)
             if is_long:
                 swing = last_confirmed_swing_high(swing_window, self.structure_swing_left, self.structure_swing_right)
                 if swing is not None and swing > current_tp and swing > bar["close"]:

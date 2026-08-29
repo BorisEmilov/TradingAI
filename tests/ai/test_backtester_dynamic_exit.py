@@ -19,6 +19,20 @@ def _ohlc(closes: np.ndarray, high_pad: float = 0.0002, low_pad: float = 0.0002)
     )
 
 
+def _ohlc_from_lows(lows: list[float]) -> pd.DataFrame:
+    highs = [low + 0.0010 for low in lows]
+    closes = [low + 0.0005 for low in lows]
+    return pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=len(lows), freq="15min"),
+            "open": closes,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+        }
+    )
+
+
 def _long_signal(entry: float, sl: float, tp: float) -> TradingSignal:
     return TradingSignal(
         symbol="EURUSD",
@@ -32,37 +46,40 @@ def _long_signal(entry: float, sl: float, tp: float) -> TradingSignal:
     )
 
 
-def test_dynamic_exit_closes_early_when_bias_reverses():
-    # 250 velas alcistas (sesgo bullish claro al momento de entrar) seguidas de una
-    # caida fuerte y sostenida -- suficiente para que el sesgo de EMAs se voltee a
-    # bearish antes de llegar al SL/TP (fijados MUY lejos a proposito para que la
-    # unica salida posible dentro de la ventana sea la invalidacion de estructura).
-    warmup = 1.1000 + 0.0004 * np.arange(250)
-    entry = warmup[-1]
-    decline = entry - 0.0010 * np.arange(1, 61)
-    closes = np.concatenate([warmup, decline])
-    candles = _ohlc(closes)
+def test_dynamic_exit_closes_early_on_a_break_of_structure():
+    # Un swing low confirmado (1.0995) antes de la entrada, y otro MAS BAJO (1.0970)
+    # confirmado despues -- una ruptura de estructura clasica (BOS/CHoCH) en contra
+    # de un LONG. SL/TP fijados MUY lejos a proposito para que la unica salida
+    # posible dentro de la ventana sea la invalidacion de estructura.
+    lows = [
+        1.1030, 1.1020, 1.1010, 1.0995, 1.1005, 1.1015, 1.1025, 1.1035,  # swing1 confirmado en idx3
+        1.1045, 1.1050,  # idx8-9, entrada en idx9
+        1.1040, 1.1030, 1.1020, 1.0970, 1.0980, 1.0990, 1.1000,  # idx10-16, swing2 (1.0970) confirmado en idx16
+    ]
+    candles = _ohlc_from_lows(lows)
+    entry = lows[9] + 0.0005
 
     signal = _long_signal(entry=entry, sl=entry - 0.5, tp=entry + 0.5)
     backtester = Backtester(
-        confidence_threshold=0.5, spread_pips=0, slippage_pips=0, max_holding_bars=60,
-        dynamic_exit=True, structure_bias_lookback_candles=250,
+        confidence_threshold=0.5, spread_pips=0, slippage_pips=0, max_holding_bars=10, dynamic_exit=True,
     )
-    trade = backtester.run(candles, [(249, signal)])[0]
+    trade = backtester.run(candles, [(9, signal)])[0]
 
     assert trade.exit_reason == "estructura"
 
 
 def test_dynamic_exit_matches_static_when_disabled_by_default():
-    warmup = 1.1000 + 0.0004 * np.arange(250)
-    entry = warmup[-1]
-    decline = entry - 0.0010 * np.arange(1, 61)
-    closes = np.concatenate([warmup, decline])
-    candles = _ohlc(closes)
+    lows = [
+        1.1030, 1.1020, 1.1010, 1.0995, 1.1005, 1.1015, 1.1025, 1.1035,
+        1.1045, 1.1050,
+        1.1040, 1.1030, 1.1020, 1.0970, 1.0980, 1.0990, 1.1000,
+    ]
+    candles = _ohlc_from_lows(lows)
+    entry = lows[9] + 0.0005
 
     signal = _long_signal(entry=entry, sl=entry - 0.5, tp=entry + 0.5)
-    backtester = Backtester(confidence_threshold=0.5, spread_pips=0, slippage_pips=0, max_holding_bars=60)
-    trade = backtester.run(candles, [(249, signal)])[0]
+    backtester = Backtester(confidence_threshold=0.5, spread_pips=0, slippage_pips=0, max_holding_bars=10)
+    trade = backtester.run(candles, [(9, signal)])[0]
 
     # Sin dynamic_exit, no hay invalidacion de estructura: el SL/TP estan tan lejos
     # que la operacion agota la ventana de holding ("timeout"), no "estructura".
@@ -94,7 +111,7 @@ def test_dynamic_exit_extends_tp_beyond_pre_existing_swing():
     static_bt = Backtester(confidence_threshold=0.5, spread_pips=0, slippage_pips=0, max_holding_bars=30)
     dynamic_bt = Backtester(
         confidence_threshold=0.5, spread_pips=0, slippage_pips=0, max_holding_bars=30,
-        dynamic_exit=True, structure_bias_lookback_candles=250, structure_lookback_candles=100,
+        dynamic_exit=True, structure_lookback_candles=100,
     )
 
     static_trade = static_bt.run(candles, [(entry_idx, signal)])[0]

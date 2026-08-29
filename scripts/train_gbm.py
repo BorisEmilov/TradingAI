@@ -29,6 +29,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import joblib  # noqa: E402
 import numpy as np  # noqa: E402
+import threadpoolctl  # noqa: E402
 from sklearn.ensemble import HistGradientBoostingClassifier  # noqa: E402
 
 from config.settings import get_settings  # noqa: E402
@@ -39,6 +40,7 @@ from tradingai.ai.data.preprocessor import normalize_ohlcv  # noqa: E402
 from tradingai.ai.training.dataset import MultiTimeframeTradingDataset  # noqa: E402
 from tradingai.utils.logging import setup_logging  # noqa: E402
 from tradingai.utils.seed import set_seed  # noqa: E402
+from tradingai.utils.thermal import wait_for_safe_temp  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
@@ -49,6 +51,14 @@ def main() -> None:
     parser.add_argument("--data-dir", default=None, help="Por defecto, paths.raw_data de config.yaml")
     parser.add_argument("--seed", type=int, default=42, help="Semilla base; el ensemble usa seed, seed+1, ... seed+n_seeds-1")
     parser.add_argument("--n-seeds", type=int, default=5, help="Numero de modelos en el ensemble")
+    # Bug real encontrado el 2026-08-29: este script entrenaba sin ningun limite de
+    # hilos ni vigilancia termica (49 hilos BLAS observados en vivo, CPU sostenida a
+    # 99-101C durante el reentreno semanal) -- el mismo patron que causo el
+    # load1=223 anomalo del 2026-08-24 en inferencia (ver gbm_predictor.py), nunca
+    # corregido aca porque este script se usa menos seguido. baseline_gbm.py (la
+    # validacion walk-forward) SI tenia esta proteccion desde el principio.
+    parser.add_argument("--max-threads", type=int, default=1)
+    parser.add_argument("--max-temp-c", type=float, default=80.0)
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -82,12 +92,14 @@ def main() -> None:
     logger.info(f"X shape: {X.shape}, distribucion direction: {np.bincount(y, minlength=3).tolist()}")
 
     models = []
-    for i in range(args.n_seeds):
-        seed = args.seed + i
-        model = HistGradientBoostingClassifier(random_state=seed, max_iter=200, early_stopping=True)
-        model.fit(X, y)
-        models.append(model)
-        logger.info(f"Modelo {i + 1}/{args.n_seeds} entrenado (seed={seed})")
+    with threadpoolctl.threadpool_limits(limits=args.max_threads):
+        for i in range(args.n_seeds):
+            wait_for_safe_temp(max_temp_c=args.max_temp_c)
+            seed = args.seed + i
+            model = HistGradientBoostingClassifier(random_state=seed, max_iter=200, early_stopping=True)
+            model.fit(X, y)
+            models.append(model)
+            logger.info(f"Modelo {i + 1}/{args.n_seeds} entrenado (seed={seed})")
 
     # "secrets" (credenciales/URL del bridge) no hace falta para inferencia y no es un
     # tipo de datos puro (pydantic BaseSettings) — no se guarda en el checkpoint.
