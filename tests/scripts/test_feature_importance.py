@@ -33,4 +33,7 @@ def test_accuracy_scoring_matches_fraction_correct():
             return np.array([1, 1, 0, 2])
 
     y = np.array([1, 0, 0, 2])
-    assert feature_importance._accuracy_scoring(_FakeEstimator(), None, y) == 0.75
+    # max_temp_c=999: nunca bloquea esperando enfriar, el test no debe depender de la
+    # temperatura real de la maquina que lo corre.
+    scoring = feature_importance._make_accuracy_scoring(max_temp_c=999.0)
+    assert scoring(_FakeEstimator(), None, y) == 0.75
