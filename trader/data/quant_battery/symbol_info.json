@@ -1,0 +1,14 @@
+{
+  "EURUSD": {
+    "point": 1e-05,
+    "digits": 5
+  },
+  "GBPUSD": {
+    "point": 1e-05,
+    "digits": 5
+  },
+  "USDJPY": {
+    "point": 0.001,
+    "digits": 3
+  }
+}

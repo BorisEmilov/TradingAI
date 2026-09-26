@@ -1,0 +1,153 @@
+[
+  {
+    "method": "GET",
+    "path": "/",
+    "status": 200,
+    "request": null,
+    "response": {
+      "name": "PythonGetaway - MT5 Gateway",
+      "version": "2.0.0",
+      "mode": "multiusuario (pool de terminales)",
+      "docs": "/docs",
+      "openapi": "/openapi.json",
+      "health": "/health",
+      "login": "POST /auth/login",
+      "pool": {
+        "IDLE": 2
+      }
+    },
+    "note": "Indice. No requiere token."
+  },
+  {
+    "method": "GET",
+    "path": "/health",
+    "status": 200,
+    "request": null,
+    "response": {
+      "status": "ok",
+      "pool": {
+        "size": 2,
+        "states": {
+          "IDLE": 2
+        },
+        "available": 2,
+        "slots": [
+          {
+            "slot_id": "slot-1",
+            "state": "IDLE",
+            "port": 8101,
+            "login": null,
+            "server": null,
+            "seconds_in_state": 30.8,
+            "error": null
+          },
+          {
+            "slot_id": "slot-2",
+            "state": "IDLE",
+            "port": 8102,
+            "login": null,
+            "server": null,
+            "seconds_in_state": 30.8,
+            "error": null
+          }
+        ]
+      },
+      "sessions_active": 0,
+      "allow_real_account": false,
+      "recycle_on_logout": true,
+      "session_ttl_seconds": 3600,
+      "session_idle_timeout_seconds": 900
+    },
+    "note": "Sonda del gateway. No requiere token. `available` es cuantos usuarios nuevos pueden autenticarse ahora mismo."
+  },
+  {
+    "method": "GET",
+    "path": "/pool",
+    "status": 200,
+    "request": null,
+    "response": {
+      "size": 2,
+      "states": {
+        "IDLE": 2
+      },
+      "available": 2,
+      "slots": [
+        {
+          "slot_id": "slot-1",
+          "state": "IDLE",
+          "port": 8101,
+          "login": null,
+          "server": null,
+          "seconds_in_state": 30.8,
+          "error": null
+        },
+        {
+          "slot_id": "slot-2",
+          "state": "IDLE",
+          "port": 8102,
+          "login": null,
+          "server": null,
+          "seconds_in_state": 30.8,
+          "error": null
+        }
+      ]
+    },
+    "note": "Estado de cada terminal del pool. Util para operar y dimensionar."
+  },
+  {
+    "method": "GET",
+    "path": "/account",
+    "status": 401,
+    "request": null,
+    "response": {
+      "error": {
+        "code": "MISSING_TOKEN",
+        "message": "Falta la cabecera 'Authorization: Bearer <token>'. Obten un token en POST /auth/login.",
+        "mt5_code": null,
+        "detail": null
+      }
+    },
+    "note": "Sin cabecera Authorization."
+  },
+  {
+    "method": "GET",
+    "path": "/positions",
+    "status": 401,
+    "request": null,
+    "response": {
+      "error": {
+        "code": "INVALID_OR_EXPIRED_TOKEN",
+        "message": "El token no existe o ha caducado. Vuelve a autenticarte.",
+        "mt5_code": null,
+        "detail": null
+      }
+    },
+    "note": "Token inexistente o caducado."
+  },
+  {
+    "method": "POST",
+    "path": "/auth/login",
+    "status": 401,
+    "request": {
+      "login": 999999999,
+      "password": "********",
+      "server": "MetaQuotes-Demo"
+    },
+    "response": {
+      "error": {
+        "code": "MT5_LOGIN_FAILED",
+        "message": "MT5 rechazo las credenciales o no pudo conectar con el servidor.",
+        "mt5_code": null,
+        "detail": {
+          "error": {
+            "code": "MT5_ERROR",
+            "message": "No se pudo inicializar el terminal MT5: Terminal: Authorization failed",
+            "mt5_code": -6,
+            "detail": null
+          }
+        }
+      }
+    },
+    "note": "MT5 rechazo las credenciales. `detail.error.mt5_code` trae el codigo original (-6 = Authorization failed)."
+  }
+]

@@ -1,0 +1,14 @@
+Arranque: python3 scripts/run_mtf_pilot.py 
+(mismo patrón que el piloto RSI: login único, 
+refresh() cada 20 min, nunca re-login en loop).
+
+Parada: python3 scripts/stop_mtf_pilot.py — escribe un stop-flag que el 
+loop chequea al principio de cada ciclo (poll cada 5 min) y termina de 
+forma ordenada. Documentado explícitamente, en el código y en la salida del 
+comando: parar el análisis nunca cierra posiciones abiertas — quedan 
+protegidas por sus SL/TP reales.
+
+
+Corre el trading automatico, python3 scripts/run_mtf_pilot.py, y monta un monitor 
+para que me actualices de todos los cambios que se produzcan en mt5, desde
+apertura de ordenes hasta movimientos de sl, tp y cierres de ordenes

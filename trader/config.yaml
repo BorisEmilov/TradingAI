@@ -1,0 +1,156 @@
+# Configuration for the multi-timeframe ICT/SMC day-trading agent.
+# See prompt-estrategia-trading-agente.md for the strategy this implements.
+
+gateway:
+  base_url: "http://127.0.0.1:8000"
+  # Credentials are read from environment variables (PYGW_LOGIN, PYGW_PASSWORD,
+  # PYGW_SERVER), never stored here.
+  timeout_seconds: 15
+  login_timeout_seconds: 90   # first login to an unfamiliar broker/server can take MT5 ~60s (symbol list pull)
+
+symbols:
+  - EURUSD
+  - GBPUSD
+  - USDJPY
+
+structure:
+  swing_left_bars: 2
+  swing_right_bars: 2
+  displacement_atr_multiple: 1.5   # min candle range (x ATR) to count as an impulse for OB/sharp-turn
+  atr_period: 14
+
+zone_lifecycle:
+  # An OB/FVG that gets touched only counts as invalidated once it holds this
+  # long past the touch without a closing break -- a break faster than this
+  # means the zone was never actually tradeable, so it's excluded from
+  # formation onward, not just from the break.
+  invalidation_grace_m15_candles: 6   # ~1.5h
+
+m15_confirmation:
+  # A confirmation counts if it fell within this many trailing M15 candles
+  # (inclusive of the one that just closed) -- 1 = only the exact candle
+  # (original behavior). Raised to 3 (~30 min of grace) per
+  # prompt-sistema-puntuacion-ponderada.md -- this is still an EXISTENCE gate
+  # (must have SOME confirmation in this window or there's no candidate at
+  # all), already-audited territory (WINDOWS=(2,3) in
+  # scripts/audit_m15_confirmation.py); the scoring system's freshness
+  # multiplier (100%/65%/35%) grades QUALITY within this same window.
+  window_candles: 3
+
+scoring:
+  # Composite weighted score replacing the old confluence AND-gate -- see
+  # logs/scoring_system_weights_proposal.md for the full weight table and
+  # ICT justification (approved after 2 review rounds). Only these two
+  # threshold values are configurable; axis weights are fixed constants in
+  # trader/pipeline/scoring.py on purpose (see that module's docstring).
+  # 50.0/67.0 are the CENTER of the sweep in prompt-sistema-puntuacion-ponderada.md,
+  # not a locked-in final answer -- scripts/run_scoring_threshold_sweep.py
+  # varies these and reports the full table.
+  min_score_trend: 50.0
+  min_score_reversal: 67.0
+
+news_filter:
+  # No operar en ventanas de noticias de alto impacto -- ver
+  # trader/news_filter.py para el alcance exacto (cubre NFP + FOMC, no CPI
+  # ni bancos centrales no-USD todavia).
+  enabled: true
+  buffer_minutes_before: 30
+  buffer_minutes_after: 60
+  nfp_auto: true   # primer viernes del mes, 8:30 ET -- calculado, no listado a mano
+  manual_events:
+    # FOMC: segundo dia de cada reunion, 14:00 America/New_York, convertido a
+    # UTC (DST-aware). Fuente: federalreserve.gov/monetarypolicy/fomccalendars.htm
+    # (verificado 2026-09-17). Sin reunion "notation vote" del 2025-08-22 --
+    # no tiene el mismo patron de comunicado a las 14:00 ET.
+    - {timestamp_utc: "2023-02-01T19:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2023-03-22T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2023-05-03T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2023-06-14T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2023-07-26T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2023-09-20T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2023-11-01T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2023-12-13T19:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2024-01-31T19:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2024-03-20T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2024-05-01T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2024-06-12T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2024-07-31T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2024-09-18T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2024-11-07T19:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2024-12-18T19:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2025-01-29T19:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2025-03-19T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2025-05-07T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2025-06-18T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2025-07-30T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2025-09-17T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2025-10-29T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2025-12-10T19:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2026-01-28T19:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2026-03-18T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2026-04-29T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2026-06-17T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2026-07-29T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2026-09-16T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2026-10-28T18:00:00+00:00", label: "FOMC"}
+    - {timestamp_utc: "2026-12-09T19:00:00+00:00", label: "FOMC"}
+
+liquidity:
+  equal_level_tolerance_pct: 0.05
+  turtle_soup_lookback_bars: 20
+  sweep_wick_min_pct: 0.10          # min wick beyond level, as % of that candle's range
+
+fvg:
+  min_gap_pct: 0.0                  # 0 = any non-overlapping gap counts
+
+support_resistance:
+  cluster_tolerance_pct: 0.10
+  min_touches: 2
+
+elliott:
+  zigzag_deviation_pct: 0.5
+
+risk:
+  min_risk_reward: 2.0
+  partial_at_progress_pct: 0.50     # take partial + move SL to breakeven at 50% of the way to TP
+  min_risk_atr_multiple: 1.0        # reject (never widen) a structural SL closer than this many H1 ATRs -- spread
+                                     # can otherwise consume most/all of an unrealistically tight structural stop
+
+confluence:
+  min_confluences: 3            # trend-following trades (with D1 bias)
+  min_timeframes: 2
+  min_confluences_reversal: 4   # counter-trend reversal trades (against D1 bias) -- stricter
+
+poi:
+  tolerance_pct: 0.1   # H1 POI counts as "at price" if it overlaps a +-this% band around current price
+
+sessions:
+  # Local exchange hours per session; converted to UTC per-date via IANA
+  # tzdata so DST transitions (London/New York) are handled automatically.
+  asia:
+    timezone: "Asia/Tokyo"
+    start_hour: 9
+    end_hour: 18
+  london:
+    timezone: "Europe/London"
+    start_hour: 8
+    end_hour: 17
+  new_york:
+    timezone: "America/New_York"
+    start_hour: 8
+    end_hour: 17
+  killzones:
+    london:
+      timezone: "Europe/London"
+      start_hour: 7
+      end_hour: 10
+    new_york:
+      timezone: "America/New_York"
+      start_hour: 8
+      end_hour: 11
+  # false (default): passing the session gate only needs ANY of Asia/London/NY
+  # active. true: only the London-NY overlap or a killzone passes.
+  require_overlap_or_killzone: false
+
+logging:
+  signals_path: "logs/signals.jsonl"

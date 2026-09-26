@@ -1,0 +1,10 @@
+# Dependencias del Python de LINUX (el gateway). Nada de MetaTrader5 aqui:
+# el gateway solo enruta, la libreria MT5 vive en los workers bajo Wine.
+#
+# Instalacion:
+#   python3 -m venv .venv-gateway
+#   ./.venv-gateway/bin/pip install -r requirements-gateway.txt
+
+fastapi
+uvicorn[standard]
+httpx

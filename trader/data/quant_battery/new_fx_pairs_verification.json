@@ -1,0 +1,695 @@
+{
+  "account_currency": "USD",
+  "symbols": {
+    "AUDUSD": {
+      "trade_mode": 4,
+      "integrity": {
+        "D1_full_history_info": {
+          "n": 8688,
+          "start": "1993-04-26",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 1,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": true,
+          "ok": true
+        },
+        "D1": {
+          "n": 3047,
+          "start": "2015-01-01",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 1,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "H1": {
+          "n": 50000,
+          "start": "2018-09-07",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 2,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 3.17,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "M15": {
+          "n": 50000,
+          "start": "2024-09-18",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 3,
+          "max_gap_days": 2.05,
+          "flat_spread_at_start": false,
+          "ok": true
+        }
+      },
+      "cross_check": {
+        "<2000": null,
+        "2000-2014": {
+          "n_days": 2730,
+          "median_dev_pct": 0.04,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.95
+        },
+        "2015-2023": {
+          "n_days": 2336,
+          "median_dev_pct": 0.033,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.7
+        },
+        "2024+": {
+          "n_days": 709,
+          "median_dev_pct": 0.038,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.28
+        },
+        "ok_recent": true,
+        "clean_from_year": 2004,
+        "n_bad_years": 0
+      },
+      "cost": {
+        "avg_spread_points_2y": 8.29488,
+        "avg_spread_points_3m": 0.3489032665299037,
+        "avg_spread_pips_3m": 0.035,
+        "live_spread_points": 1,
+        "n_distinct_spread_values": 100,
+        "real_spread_data": true
+      },
+      "sizing": {
+        "currency_profit": "USD",
+        "conv_rate_to_usd": 1.0,
+        "mt5_tick_value": 1.0,
+        "independent_tick_value": 1.0,
+        "tick_value_rel_err": 0.0,
+        "lots_code": 0.83,
+        "lots_hand": 0.83,
+        "realized_risk_usd": 249.0,
+        "ok": true
+      },
+      "accepted": true
+    },
+    "USDCAD": {
+      "trade_mode": 4,
+      "integrity": {
+        "D1_full_history_info": {
+          "n": 8689,
+          "start": "1993-04-27",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 2,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "D1": {
+          "n": 3046,
+          "start": "2015-01-01",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 0,
+          "longest_identical_close_run": 1,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "H1": {
+          "n": 50000,
+          "start": "2018-09-07",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 2,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 3.17,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "M15": {
+          "n": 50000,
+          "start": "2024-09-18",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 3,
+          "max_gap_days": 2.05,
+          "flat_spread_at_start": false,
+          "ok": true
+        }
+      },
+      "cross_check": {
+        "<2000": {
+          "n_days": 103,
+          "median_dev_pct": 0.06,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.31
+        },
+        "2000-2014": {
+          "n_days": 3741,
+          "median_dev_pct": 0.024,
+          "frac_days_dev_gt_1pct": 0.0003,
+          "max_dev_pct": 1.35
+        },
+        "2015-2023": {
+          "n_days": 2336,
+          "median_dev_pct": 0.006,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.32
+        },
+        "2024+": {
+          "n_days": 710,
+          "median_dev_pct": 0.01,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.09
+        },
+        "ok_recent": true,
+        "clean_from_year": 1999,
+        "n_bad_years": 1
+      },
+      "cost": {
+        "avg_spread_points_2y": 8.36728,
+        "avg_spread_points_3m": 0.3784124980274578,
+        "avg_spread_pips_3m": 0.038,
+        "live_spread_points": 1,
+        "n_distinct_spread_values": 143,
+        "real_spread_data": true
+      },
+      "sizing": {
+        "currency_profit": "CAD",
+        "conv_rate_to_usd": 0.7067537387272779,
+        "mt5_tick_value": 0.7067437488515415,
+        "independent_tick_value": 0.7067537387272779,
+        "tick_value_rel_err": 1e-05,
+        "lots_code": 1.17,
+        "lots_hand": 1.17,
+        "realized_risk_usd": 248.07,
+        "ok": true
+      },
+      "accepted": true
+    },
+    "USDCHF": {
+      "trade_mode": 4,
+      "integrity": {
+        "D1_full_history_info": {
+          "n": 14328,
+          "start": "1971-01-03",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 4008,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 10.0,
+          "flat_spread_at_start": true,
+          "ok": false
+        },
+        "D1": {
+          "n": 3045,
+          "start": "2015-01-01",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 0,
+          "longest_identical_close_run": 1,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "H1": {
+          "n": 50000,
+          "start": "2018-09-07",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 2,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 3.17,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "M15": {
+          "n": 50000,
+          "start": "2024-09-18",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 0,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 2.05,
+          "flat_spread_at_start": false,
+          "ok": true
+        }
+      },
+      "cross_check": {
+        "<2000": {
+          "n_days": 1738,
+          "median_dev_pct": 0.043,
+          "frac_days_dev_gt_1pct": 0.0449,
+          "max_dev_pct": 2.35
+        },
+        "2000-2014": {
+          "n_days": 3902,
+          "median_dev_pct": 0.011,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.44
+        },
+        "2015-2023": {
+          "n_days": 2324,
+          "median_dev_pct": 0.009,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.51
+        },
+        "2024+": {
+          "n_days": 710,
+          "median_dev_pct": 0.021,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.18
+        },
+        "ok_recent": true,
+        "clean_from_year": 1999,
+        "n_bad_years": 3
+      },
+      "cost": {
+        "avg_spread_points_2y": 11.73906,
+        "avg_spread_points_3m": 0.37762348114249644,
+        "avg_spread_pips_3m": 0.038,
+        "live_spread_points": 2,
+        "n_distinct_spread_values": 185,
+        "real_spread_data": true
+      },
+      "sizing": {
+        "currency_profit": "CHF",
+        "conv_rate_to_usd": 1.2061053050541841,
+        "mt5_tick_value": 1.2060398475565635,
+        "independent_tick_value": 1.2061053050541841,
+        "tick_value_rel_err": 5e-05,
+        "lots_code": 0.69,
+        "lots_hand": 0.69,
+        "realized_risk_usd": 249.66,
+        "ok": true
+      },
+      "accepted": true
+    },
+    "NZDUSD": {
+      "trade_mode": 4,
+      "integrity": {
+        "D1_full_history_info": {
+          "n": 8492,
+          "start": "1994-01-31",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 4,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": true,
+          "ok": true
+        },
+        "D1": {
+          "n": 3046,
+          "start": "2015-01-01",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 0,
+          "longest_identical_close_run": 1,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "H1": {
+          "n": 50000,
+          "start": "2018-09-07",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 2,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 3.17,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "M15": {
+          "n": 50000,
+          "start": "2024-09-18",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 2.05,
+          "flat_spread_at_start": false,
+          "ok": true
+        }
+      },
+      "cross_check": {
+        "<2000": {
+          "n_days": 258,
+          "median_dev_pct": 0.068,
+          "frac_days_dev_gt_1pct": 0.0155,
+          "max_dev_pct": 2.46
+        },
+        "2000-2014": {
+          "n_days": 3719,
+          "median_dev_pct": 0.075,
+          "frac_days_dev_gt_1pct": 0.0024,
+          "max_dev_pct": 1.72
+        },
+        "2015-2023": {
+          "n_days": 2336,
+          "median_dev_pct": 0.054,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.92
+        },
+        "2024+": {
+          "n_days": 709,
+          "median_dev_pct": 0.048,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.47
+        },
+        "ok_recent": true,
+        "clean_from_year": 2003,
+        "n_bad_years": 4
+      },
+      "cost": {
+        "avg_spread_points_2y": 10.6393,
+        "avg_spread_points_3m": 0.19031087265267477,
+        "avg_spread_pips_3m": 0.019,
+        "live_spread_points": 0,
+        "n_distinct_spread_values": 122,
+        "real_spread_data": true
+      },
+      "sizing": {
+        "currency_profit": "USD",
+        "conv_rate_to_usd": 1.0,
+        "mt5_tick_value": 1.0,
+        "independent_tick_value": 1.0,
+        "tick_value_rel_err": 0.0,
+        "lots_code": 0.83,
+        "lots_hand": 0.83,
+        "realized_risk_usd": 249.0,
+        "ok": true
+      },
+      "accepted": true
+    },
+    "EURJPY": {
+      "trade_mode": 4,
+      "integrity": {
+        "D1_full_history_info": {
+          "n": 8559,
+          "start": "1993-04-26",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 3,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 121.0,
+          "flat_spread_at_start": true,
+          "ok": false
+        },
+        "D1": {
+          "n": 3046,
+          "start": "2015-01-01",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 0,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "H1": {
+          "n": 50000,
+          "start": "2018-09-07",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 5,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 3.12,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "M15": {
+          "n": 50000,
+          "start": "2024-09-18",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 2.05,
+          "flat_spread_at_start": false,
+          "ok": true
+        }
+      },
+      "cross_check": {
+        "<2000": {
+          "n_days": 1737,
+          "median_dev_pct": 0.045,
+          "frac_days_dev_gt_1pct": 0.042,
+          "max_dev_pct": 2.15
+        },
+        "2000-2014": {
+          "n_days": 3775,
+          "median_dev_pct": 0.008,
+          "frac_days_dev_gt_1pct": 0.0005,
+          "max_dev_pct": 1.94
+        },
+        "2015-2023": {
+          "n_days": 2336,
+          "median_dev_pct": 0.006,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.47
+        },
+        "2024+": {
+          "n_days": 709,
+          "median_dev_pct": 0.01,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.23
+        },
+        "ok_recent": true,
+        "clean_from_year": 1999,
+        "n_bad_years": 3
+      },
+      "cost": {
+        "avg_spread_points_2y": 16.4075,
+        "avg_spread_points_3m": 1.6807637683446426,
+        "avg_spread_pips_3m": 0.168,
+        "live_spread_points": 0,
+        "n_distinct_spread_values": 202,
+        "real_spread_data": true
+      },
+      "sizing": {
+        "currency_profit": "JPY",
+        "conv_rate_to_usd": 0.00632183181398642,
+        "mt5_tick_value": 0.6322391381316069,
+        "independent_tick_value": 0.632183181398642,
+        "tick_value_rel_err": 9e-05,
+        "lots_code": 1.31,
+        "lots_hand": 1.31,
+        "realized_risk_usd": 248.45,
+        "ok": true
+      },
+      "accepted": true
+    },
+    "EURGBP": {
+      "trade_mode": 4,
+      "integrity": {
+        "D1_full_history_info": {
+          "n": 8681,
+          "start": "1993-05-02",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 7.0,
+          "flat_spread_at_start": true,
+          "ok": false
+        },
+        "D1": {
+          "n": 3047,
+          "start": "2015-01-01",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 0,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "H1": {
+          "n": 50000,
+          "start": "2018-09-07",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 3,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 3.17,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "M15": {
+          "n": 50000,
+          "start": "2024-09-18",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 2,
+          "longest_identical_close_run": 3,
+          "max_gap_days": 2.05,
+          "flat_spread_at_start": false,
+          "ok": true
+        }
+      },
+      "cross_check": {
+        "<2000": {
+          "n_days": 1729,
+          "median_dev_pct": 0.037,
+          "frac_days_dev_gt_1pct": 0.0422,
+          "max_dev_pct": 2.19
+        },
+        "2000-2014": {
+          "n_days": 3898,
+          "median_dev_pct": 0.018,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.56
+        },
+        "2015-2023": {
+          "n_days": 2336,
+          "median_dev_pct": 0.026,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.65
+        },
+        "2024+": {
+          "n_days": 710,
+          "median_dev_pct": 0.023,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.22
+        },
+        "ok_recent": true,
+        "clean_from_year": 1999,
+        "n_bad_years": 1
+      },
+      "cost": {
+        "avg_spread_points_2y": 11.2637,
+        "avg_spread_points_3m": 0.56367366261638,
+        "avg_spread_pips_3m": 0.056,
+        "live_spread_points": 1,
+        "n_distinct_spread_values": 129,
+        "real_spread_data": true
+      },
+      "sizing": {
+        "currency_profit": "GBP",
+        "conv_rate_to_usd": 1.32148,
+        "mt5_tick_value": 1.32153,
+        "independent_tick_value": 1.32148,
+        "tick_value_rel_err": 4e-05,
+        "lots_code": 0.63,
+        "lots_hand": 0.63,
+        "realized_risk_usd": 249.76,
+        "ok": true
+      },
+      "accepted": true
+    },
+    "GBPJPY": {
+      "trade_mode": 4,
+      "integrity": {
+        "D1_full_history_info": {
+          "n": 8686,
+          "start": "1993-04-18",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 1,
+          "max_gap_days": 5.0,
+          "flat_spread_at_start": true,
+          "ok": false
+        },
+        "D1": {
+          "n": 3045,
+          "start": "2015-01-01",
+          "end": "2026-09-23",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 0,
+          "longest_identical_close_run": 1,
+          "max_gap_days": 4.0,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "H1": {
+          "n": 50000,
+          "start": "2018-09-07",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 1,
+          "max_gap_days": 3.17,
+          "flat_spread_at_start": false,
+          "ok": true
+        },
+        "M15": {
+          "n": 50000,
+          "start": "2024-09-18",
+          "end": "2026-09-25",
+          "ohlc_inconsistent": 0,
+          "zero_range_bars": 1,
+          "longest_identical_close_run": 2,
+          "max_gap_days": 2.05,
+          "flat_spread_at_start": false,
+          "ok": true
+        }
+      },
+      "cross_check": {
+        "<2000": {
+          "n_days": 1718,
+          "median_dev_pct": 0.048,
+          "frac_days_dev_gt_1pct": 0.0052,
+          "max_dev_pct": 4.14
+        },
+        "2000-2014": {
+          "n_days": 3902,
+          "median_dev_pct": 0.01,
+          "frac_days_dev_gt_1pct": 0.0003,
+          "max_dev_pct": 3.9
+        },
+        "2015-2023": {
+          "n_days": 2336,
+          "median_dev_pct": 0.006,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.27
+        },
+        "2024+": {
+          "n_days": 709,
+          "median_dev_pct": 0.01,
+          "frac_days_dev_gt_1pct": 0.0,
+          "max_dev_pct": 0.22
+        },
+        "ok_recent": true,
+        "clean_from_year": 1993,
+        "n_bad_years": 6
+      },
+      "cost": {
+        "avg_spread_points_2y": 21.93008,
+        "avg_spread_points_3m": 3.318447214770396,
+        "avg_spread_pips_3m": 0.332,
+        "live_spread_points": 8,
+        "n_distinct_spread_values": 315,
+        "real_spread_data": true
+      },
+      "sizing": {
+        "currency_profit": "JPY",
+        "conv_rate_to_usd": 0.00632183181398642,
+        "mt5_tick_value": 0.6322391381316069,
+        "independent_tick_value": 0.632183181398642,
+        "tick_value_rel_err": 9e-05,
+        "lots_code": 1.31,
+        "lots_hand": 1.31,
+        "realized_risk_usd": 248.45,
+        "ok": true
+      },
+      "accepted": true
+    }
+  },
+  "accepted": [
+    "AUDUSD",
+    "USDCAD",
+    "USDCHF",
+    "NZDUSD",
+    "EURJPY",
+    "EURGBP",
+    "GBPJPY"
+  ]
+}

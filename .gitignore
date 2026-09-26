@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv*/
+venv/
+.pytest_cache/
+
+# .NET
+bin/
+obj/
+
+# Node
+node_modules/
+dist/
+
+# Secretos
+.env
+!.env.example
+api_backend/src/ApiBackend.Api/appsettings.json
+
+# Runtime / logs pesados
+*.pid
+PythonGetaway/run/
+PythonGetaway/logs/
+trader/logs/*.jsonl
+trader/logs/*_state.json
+trader/logs/*_events.txt
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store
+.claude

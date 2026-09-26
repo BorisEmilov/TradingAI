@@ -1,0 +1,588 @@
+<html><head><meta charset='utf-8'><style>
+@page { size: A4; margin: 15mm 12mm 16mm 12mm; }
+body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 9.2pt; color: #1a1a1a; line-height: 1.45; }
+h1 { font-size: 22pt; margin: 0 0 2mm 0; color: #0b3d62; }
+h2 { font-size: 14pt; margin: 9mm 0 3mm 0; color: #0b3d62;
+     border-bottom: 2px solid #0b3d62; padding-bottom: 1.5mm; page-break-after: avoid; }
+h3 { font-size: 10.5pt; margin: 5mm 0 1.5mm 0; page-break-after: avoid; }
+h4 { font-size: 9.2pt; margin: 3mm 0 1mm 0; color: #444; page-break-after: avoid; }
+p { margin: 1.5mm 0; }
+code, pre { font-family: "DejaVu Sans Mono", "Courier New", monospace; }
+code { background: #eef2f6; padding: 0.4mm 1mm; border-radius: 2px; font-size: 8.4pt; }
+pre { background: #f6f8fa; border: 1px solid #d8dee4; border-left: 3px solid #0b3d62;
+      padding: 2.5mm 3mm; font-size: 7.6pt; white-space: pre-wrap; word-wrap: break-word;
+      border-radius: 3px; margin: 1.5mm 0; }
+table { width: 100%; border-collapse: collapse; margin: 2mm 0; font-size: 8.2pt; }
+th { background: #0b3d62; color: #fff; text-align: left; padding: 1.4mm 2mm; font-weight: 600; }
+td { border-bottom: 1px solid #dde3e9; padding: 1.4mm 2mm; vertical-align: top; }
+tr:nth-child(even) td { background: #f8fafc; }
+.ep { border: 1px solid #d8dee4; border-radius: 4px; padding: 3mm; margin: 4mm 0;
+      page-break-inside: avoid; background: #fff; }
+.m { display: inline-block; padding: 0.7mm 2.2mm; border-radius: 3px; color: #fff;
+     font-weight: 700; font-size: 8pt; font-family: "DejaVu Sans Mono", monospace; }
+.get { background: #1a7f37; } .post { background: #0969da; } .delete { background: #cf222e; }
+.path { font-family: "DejaVu Sans Mono", monospace; font-size: 10pt; font-weight: 700; color: #0b3d62; }
+.note { background: #fff8e1; border-left: 3px solid #f0ad4e; padding: 2mm 3mm; margin: 2mm 0; font-size: 8.4pt; }
+.warn { background: #fdeaea; border-left: 3px solid #cf222e; padding: 2mm 3mm; margin: 2mm 0; font-size: 8.4pt; }
+.ok   { background: #e8f5e9; border-left: 3px solid #1a7f37; padding: 2mm 3mm; margin: 2mm 0; font-size: 8.4pt; }
+.cmd { background: #14181d; color: #e6edf3; padding: 3mm; border-radius: 4px;
+       font-family: "DejaVu Sans Mono", monospace; font-size: 8.6pt; white-space: pre-wrap; margin: 2mm 0; }
+.cover { text-align: center; padding-top: 55mm; page-break-after: always; }
+.cover h1 { font-size: 30pt; border: 0; }
+.sub { color: #55636e; font-size: 11pt; margin-top: 2mm; }
+.meta { margin-top: 22mm; font-size: 9pt; color: #55636e; }
+.req { color: #cf222e; font-weight: 700; }
+.opt { color: #7a828a; }
+.toc td { border: 0; padding: 0.8mm 2mm; }
+.small { font-size: 8pt; color: #55636e; }
+.tok { display: inline-block; background: #e7f0fb; color: #0b3d62; border: 1px solid #b6d4f2;
+       border-radius: 3px; padding: 0.4mm 1.6mm; font-size: 7.4pt; margin-left: 2mm; }
+.notok { display: inline-block; background: #eef1f4; color: #55636e; border: 1px solid #dde3e9;
+         border-radius: 3px; padding: 0.4mm 1.6mm; font-size: 7.4pt; margin-left: 2mm; }
+</style></head><body>
+<div class="cover">
+  <h1>PythonGetaway</h1>
+  <div class="sub">Gateway HTTP multiusuario sobre MetaTrader&nbsp;5</div>
+  <div class="sub">Referencia completa de la API &mdash; 49 endpoints</div>
+  <div class="meta">
+    Version 2.0.0 &mdash; multiusuario<br>
+    Cliente destino: .NET<br>
+    Todos los ejemplos de este documento son respuestas <b>reales</b><br>
+    capturadas contra una cuenta MT5 en vivo.
+  </div>
+</div>
+<h2>1. Endpoints nuevos: autenticacion y pool (8)</h2>
+<p>Estos son los endpoints que <b>no existian</b> en la version monousuario. Son la puerta de
+entrada de la API: sin un token de <code>/auth/login</code> ninguno de los otros
+41 responde.</p>
+
+<div class="ok"><b>Resumen del flujo.</b>
+<code>POST /auth/login</code> con las credenciales MT5 del usuario devuelve un
+<code>token</code>. Ese token va en <code>Authorization: Bearer &lt;token&gt;</code> en todas las
+llamadas siguientes. <code>POST /auth/logout</code> libera el terminal.</div>
+
+<table>
+  <tr><th>Metodo</th><th>Ruta</th><th>Necesita token</th><th>Para que</th></tr>
+  <tr><td><code>POST</code></td><td><code>/auth/login</code></td><td>no</td>
+      <td>Autenticarse con credenciales MT5 y reservar un terminal dedicado.</td></tr>
+  <tr><td><code>POST</code></td><td><code>/auth/refresh</code></td><td><b>si</b></td>
+      <td>Reiniciar el reloj de vida maxima. El token no cambia.</td></tr>
+  <tr><td><code>POST</code></td><td><code>/auth/logout</code></td><td><b>si</b></td>
+      <td>Cerrar la sesion y devolver el terminal al pool.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/auth/session</code></td><td><b>si</b></td>
+      <td>Estado de la sesion actual. Renueva la ventana de inactividad.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/auth/sessions</code></td><td>no</td>
+      <td>Sesiones activas, sin tokens ni credenciales. Vision de operacion.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/</code></td><td>no</td>
+      <td>Indice del gateway.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/health</code></td><td>no</td>
+      <td>Sonda: estado del gateway y cuantos usuarios nuevos caben.</td></tr>
+  <tr><td><code>GET</code></td><td><code>/pool</code></td><td>no</td>
+      <td>Detalle de cada terminal del pool.</td></tr>
+</table>
+
+<div class="warn"><b>La contrasena no se guarda en ningun sitio.</b> Viaja una sola vez del cliente
+al worker, autentica el terminal y se descarta: no va a disco, ni a los logs, ni queda en memoria
+del gateway. Si el gateway se reinicia, los usuarios vuelven a autenticarse.<br><br>
+Y por eso mismo: con <code>--host 0.0.0.0</code> y sin HTTPS delante, esas credenciales viajan
+<b>en claro</b>. Pon un reverse proxy con TLS.</div>
+<h3>Autenticacion</h3><div class="ep"><span class="m post">POST</span> <span class="path">/auth/login</span> <span class="notok">sin token</span><h3 style='margin-top:2mm'>Autenticarse en MT5 con credenciales propias</h3><p>Reserva un terminal MT5 dedicado para esta cuenta y devuelve un token.</p><p>Si la cuenta ya tiene una sesion viva, se devuelve **la misma sesion** en
+lugar de consumir un segundo slot.</p><p>La contrasena no se guarda: viaja una vez hasta el worker, autentica el
+terminal y se descarta. Nunca aparece en logs.</p><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>login</code></td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>Numero de cuenta MT5.</td></tr><tr><td><code>password</code></td><td><code>string</code></td><td><span class="req">si</span></td><td>Contrasena de la cuenta (de operador o de inversor). No se guarda en ningun sitio: se usa para autenticar el terminal y se descarta.</td></tr><tr><td><code>server</code></td><td><code>string</code></td><td><span class="req">si</span></td><td>Nombre exacto del servidor del broker, tal cual aparece en MT5. Distingue mayusculas.</td></tr></table><h4>Respuesta &mdash; <code>application/json</code> (HTTP 200)</h4><table><tr><th>Campo</th><th>Tipo</th><th>Presencia</th><th>Descripcion</th></tr><tr><td><code>slot_id</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td>Terminal MT5 asignado a esta sesion.</td></tr><tr><td><code>login</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Cuenta autenticada.</td></tr><tr><td><code>server</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td></td></tr><tr><td><code>account</code></td><td><code>object?</code></td><td><span class="opt">puede faltar</span></td><td>Resumen de la cuenta.</td></tr><tr><td><code>created_at</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Epoch UTC en segundos del login.</td></tr><tr><td><code>last_seen</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Epoch UTC de la ultima peticion con este token.</td></tr><tr><td><code>expires_at</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Epoch UTC en que caduca. Es el MINIMO entre vida maxima e inactividad.</td></tr><tr><td><code>expires_in</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Segundos que le quedan.</td></tr><tr><td><code>ttl_seconds</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Vida maxima configurada.</td></tr><tr><td><code>idle_timeout_seconds</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Ventana de inactividad configurada.</td></tr><tr><td><code>token</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td>Token de sesion. Va en `Authorization: Bearer &lt;token&gt;` en TODAS las llamadas siguientes.</td></tr><tr><td><code>reused</code></td><td><code>boolean</code></td><td><span class="req">siempre</span></td><td>`true` si la cuenta ya tenia una sesion viva y se devuelve esa misma en lugar de consumir otro terminal.</td></tr></table><div class="note"><b>Estructura documentada, no capturada.</b> Un login exitoso exige credenciales reales, asi que este ejemplo describe la forma exacta de la respuesta (derivada del codigo y del esquema), no una ejecucion. Lanzando el selftest con <code>PYGW_TEST_LOGIN</code> / <code>PYGW_TEST_PASSWORD</code> / <code>PYGW_TEST_SERVER</code> y regenerando este PDF, se sustituye por una captura real.</div><h4>Peticion</h4><pre>{
+  "login": 5054767214,
+  "password": "&lt;tu contrasena&gt;",
+  "server": "MetaQuotes-Demo"
+}</pre><h4>Respuesta correcta &mdash; HTTP 200</h4><pre>{
+  "reused": false,
+  "token": "kHs9_2FqxV7bN1pQ...   (43 caracteres url-safe)",
+  "slot_id": "slot-1",
+  "login": 5054767214,
+  "server": "MetaQuotes-Demo",
+  "account": {
+    "login": 5054767214,
+    "server": "MetaQuotes-Demo",
+    "currency": "USD",
+    "balance": 96126.17,
+    "equity": 96126.17,
+    "trade_mode": 0,
+    "trade_mode_name": "DEMO",
+    "trade_allowed": true
+  },
+  "created_at": 1789040000,
+  "last_seen": 1789040000,
+  "expires_at": 1789040900,
+  "expires_in": 900,
+  "ttl_seconds": 3600,
+  "idle_timeout_seconds": 900
+}</pre><div class="note">MT5 rechazo las credenciales. `detail.error.mt5_code` trae el codigo original (-6 = Authorization failed).</div><h4>Ejemplo de peticion (real)</h4><pre>{
+  "login": 999999999,
+  "password": "********",
+  "server": "MetaQuotes-Demo"
+}</pre><h4>Ejemplo de ERROR (real, capturado) &mdash; HTTP 401</h4><pre>{
+  "error": {
+    "code": "MT5_LOGIN_FAILED",
+    "message": "MT5 rechazo las credenciales o no pudo conectar con el servidor.",
+    "mt5_code": null,
+    "detail": {
+      "error": {
+        "code": "MT5_ERROR",
+        "message": "No se pudo inicializar el terminal MT5: Terminal: Authorization failed",
+        "mt5_code": -6,
+        "detail": null
+      }
+    }
+  }
+}</pre></div><div class="ep"><span class="m post">POST</span> <span class="path">/auth/refresh</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Renovar la sesion sin reenviar credenciales</h3><p>Reinicia el reloj de **vida maxima** de la sesion.</p><p>El token **no cambia**: se sigue usando el mismo, con lo que no hay carrera
+con peticiones en vuelo. Solo se reinicia el contador.</p><p>Cuando hace falta:</p><p>- La ventana de **inactividad** (15 min) ya se renueva sola con cualquier
+  llamada autenticada. Para eso no hace falta este endpoint.
+- El tope de **vida maxima** (1 h) NO se renueva solo. Un cliente que este
+  conectado toda la sesion bursatil debe llamar aqui cada cierto tiempo
+  (p.ej. cada 30 min) para no verse obligado a reenviar las credenciales.</p><p>Si prefieres que no exista tope absoluto, arranca con `PYGW_SESSION_TTL=0`:
+entonces la sesion solo muere por inactividad y este endpoint es opcional.</p><h4>Respuesta &mdash; <code>application/json</code> (HTTP 200)</h4><table><tr><th>Campo</th><th>Tipo</th><th>Presencia</th><th>Descripcion</th></tr><tr><td><code>slot_id</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td>Terminal MT5 asignado a esta sesion.</td></tr><tr><td><code>login</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Cuenta autenticada.</td></tr><tr><td><code>server</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td></td></tr><tr><td><code>account</code></td><td><code>object?</code></td><td><span class="opt">puede faltar</span></td><td>Resumen de la cuenta.</td></tr><tr><td><code>created_at</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Epoch UTC en segundos del login.</td></tr><tr><td><code>last_seen</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Epoch UTC de la ultima peticion con este token.</td></tr><tr><td><code>expires_at</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Epoch UTC en que caduca. Es el MINIMO entre vida maxima e inactividad.</td></tr><tr><td><code>expires_in</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Segundos que le quedan.</td></tr><tr><td><code>ttl_seconds</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Vida maxima configurada.</td></tr><tr><td><code>idle_timeout_seconds</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Ventana de inactividad configurada.</td></tr></table><div class="note"><b>Estructura documentada, no capturada.</b> Un login exitoso exige credenciales reales, asi que este ejemplo describe la forma exacta de la respuesta (derivada del codigo y del esquema), no una ejecucion. Lanzando el selftest con <code>PYGW_TEST_LOGIN</code> / <code>PYGW_TEST_PASSWORD</code> / <code>PYGW_TEST_SERVER</code> y regenerando este PDF, se sustituye por una captura real.</div><h4>Respuesta correcta &mdash; HTTP 200</h4><pre>{
+  "slot_id": "slot-1",
+  "login": 5054767214,
+  "server": "MetaQuotes-Demo",
+  "account": {
+    "login": 5054767214,
+    "server": "MetaQuotes-Demo",
+    "currency": "USD",
+    "balance": 96126.17,
+    "equity": 96126.17,
+    "trade_mode": 0,
+    "trade_mode_name": "DEMO",
+    "trade_allowed": true
+  },
+  "created_at": 1789041000,
+  "last_seen": 1789041000,
+  "expires_at": 1789041900,
+  "expires_in": 900,
+  "ttl_seconds": 3600,
+  "idle_timeout_seconds": 900
+}</pre></div><div class="ep"><span class="m get">GET</span> <span class="path">/auth/session</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Estado de la sesion actual</h3><p>Datos de la sesion asociada al token, con lo que le queda de vida.
+Llamarlo tambien **renueva** la ventana de inactividad.</p><h4>Respuesta &mdash; <code>application/json</code> (HTTP 200)</h4><table><tr><th>Campo</th><th>Tipo</th><th>Presencia</th><th>Descripcion</th></tr><tr><td><code>slot_id</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td>Terminal MT5 asignado a esta sesion.</td></tr><tr><td><code>login</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Cuenta autenticada.</td></tr><tr><td><code>server</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td></td></tr><tr><td><code>account</code></td><td><code>object?</code></td><td><span class="opt">puede faltar</span></td><td>Resumen de la cuenta.</td></tr><tr><td><code>created_at</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Epoch UTC en segundos del login.</td></tr><tr><td><code>last_seen</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Epoch UTC de la ultima peticion con este token.</td></tr><tr><td><code>expires_at</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Epoch UTC en que caduca. Es el MINIMO entre vida maxima e inactividad.</td></tr><tr><td><code>expires_in</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Segundos que le quedan.</td></tr><tr><td><code>ttl_seconds</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Vida maxima configurada.</td></tr><tr><td><code>idle_timeout_seconds</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Ventana de inactividad configurada.</td></tr></table><div class="note"><b>Estructura documentada, no capturada.</b> Un login exitoso exige credenciales reales, asi que este ejemplo describe la forma exacta de la respuesta (derivada del codigo y del esquema), no una ejecucion. Lanzando el selftest con <code>PYGW_TEST_LOGIN</code> / <code>PYGW_TEST_PASSWORD</code> / <code>PYGW_TEST_SERVER</code> y regenerando este PDF, se sustituye por una captura real.</div><h4>Respuesta correcta &mdash; HTTP 200</h4><pre>{
+  "slot_id": "slot-1",
+  "login": 5054767214,
+  "server": "MetaQuotes-Demo",
+  "account": {
+    "login": 5054767214,
+    "server": "MetaQuotes-Demo",
+    "currency": "USD",
+    "balance": 96126.17,
+    "equity": 96126.17,
+    "trade_mode": 0,
+    "trade_mode_name": "DEMO",
+    "trade_allowed": true
+  },
+  "created_at": 1789040000,
+  "last_seen": 1789040420,
+  "expires_at": 1789041320,
+  "expires_in": 900,
+  "ttl_seconds": 3600,
+  "idle_timeout_seconds": 900
+}</pre></div><div class="ep"><span class="m post">POST</span> <span class="path">/auth/logout</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Cerrar sesion y liberar el terminal</h3><p>Cierra la sesion MT5 y devuelve el slot al pool.</p><p>Por defecto el terminal se reinicia para que no quede ninguna cuenta
+conectada (`PYGW_RECYCLE_ON_LOGOUT`), asi que el slot tarda unos segundos
+en volver a estar disponible.</p><h4>Respuesta &mdash; <code>application/json</code> (HTTP 200)</h4><table><tr><th>Campo</th><th>Tipo</th><th>Presencia</th><th>Descripcion</th></tr><tr><td><code>logged_out</code></td><td><code>boolean</code></td><td><span class="req">siempre</span></td><td>Siempre `true` si el token era valido.</td></tr><tr><td><code>recycled</code></td><td><code>boolean</code></td><td><span class="req">siempre</span></td><td>Si el terminal se reinicia para no dejar ninguna cuenta conectada (`PYGW_RECYCLE_ON_LOGOUT`).</td></tr></table><div class="note"><b>Estructura documentada, no capturada.</b> Un login exitoso exige credenciales reales, asi que este ejemplo describe la forma exacta de la respuesta (derivada del codigo y del esquema), no una ejecucion. Lanzando el selftest con <code>PYGW_TEST_LOGIN</code> / <code>PYGW_TEST_PASSWORD</code> / <code>PYGW_TEST_SERVER</code> y regenerando este PDF, se sustituye por una captura real.</div><h4>Respuesta correcta &mdash; HTTP 200</h4><pre>{
+  "logged_out": true,
+  "recycled": true
+}</pre></div><div class="ep"><span class="m get">GET</span> <span class="path">/auth/sessions</span> <span class="notok">sin token</span><h3 style='margin-top:2mm'>Sesiones activas (sin datos sensibles)</h3><p>Vision de operacion: cuantas sesiones hay y en que slot esta cada una.
+No expone tokens ni credenciales.</p><h4>Respuesta &mdash; <code>application/json</code> (HTTP 200)</h4><table><tr><th>Campo</th><th>Tipo</th><th>Presencia</th><th>Descripcion</th></tr><tr><td><code>count</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Numero de sesiones activas.</td></tr><tr><td><code>sessions</code></td><td><code>array&lt;object&gt;</code></td><td><span class="req">siempre</span></td><td>Una entrada por sesion. No expone tokens ni credenciales.</td></tr><tr><td style='padding-left:5mm'><code>sessions[].slot_id</code></td><td><code>string</code></td><td></td><td></td></tr><tr><td style='padding-left:5mm'><code>sessions[].login</code></td><td><code>integer (int64)</code></td><td></td><td></td></tr><tr><td style='padding-left:5mm'><code>sessions[].server</code></td><td><code>string</code></td><td></td><td></td></tr><tr><td style='padding-left:5mm'><code>sessions[].created_at</code></td><td><code>integer (int64)</code></td><td></td><td></td></tr><tr><td style='padding-left:5mm'><code>sessions[].last_seen</code></td><td><code>integer (int64)</code></td><td></td><td></td></tr><tr><td style='padding-left:5mm'><code>sessions[].expires_at</code></td><td><code>integer (int64)</code></td><td></td><td></td></tr><tr><td style='padding-left:5mm'><code>sessions[].expires_in</code></td><td><code>integer (int64)</code></td><td></td><td></td></tr><tr><td style='padding-left:5mm'><code>sessions[].ttl_seconds</code></td><td><code>integer (int64)</code></td><td></td><td></td></tr><tr><td style='padding-left:5mm'><code>sessions[].idle_timeout_seconds</code></td><td><code>integer (int64)</code></td><td></td><td></td></tr></table><div class="note"><b>Estructura documentada, no capturada.</b> Un login exitoso exige credenciales reales, asi que este ejemplo describe la forma exacta de la respuesta (derivada del codigo y del esquema), no una ejecucion. Lanzando el selftest con <code>PYGW_TEST_LOGIN</code> / <code>PYGW_TEST_PASSWORD</code> / <code>PYGW_TEST_SERVER</code> y regenerando este PDF, se sustituye por una captura real.</div><h4>Respuesta correcta &mdash; HTTP 200</h4><pre>{
+  "count": 1,
+  "sessions": [
+    {
+      "slot_id": "slot-1",
+      "login": 5054767214,
+      "server": "MetaQuotes-Demo",
+      "created_at": 1789040000,
+      "last_seen": 1789040420,
+      "expires_at": 1789041320,
+      "expires_in": 900,
+      "ttl_seconds": 3600,
+      "idle_timeout_seconds": 900
+    }
+  ]
+}</pre></div><h3>Gateway y pool</h3><div class="ep"><span class="m get">GET</span> <span class="path">/</span> <span class="notok">sin token</span><h3 style='margin-top:2mm'>Indice del gateway</h3><h4>Respuesta &mdash; <code>application/json</code> (HTTP 200)</h4><table><tr><th>Campo</th><th>Tipo</th><th>Presencia</th><th>Descripcion</th></tr><tr><td><code>name</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td></td></tr><tr><td><code>version</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td></td></tr><tr><td><code>mode</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td></td></tr><tr><td><code>docs</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td>Ruta de la documentacion interactiva.</td></tr><tr><td><code>openapi</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td>Ruta del esquema OpenAPI.</td></tr><tr><td><code>health</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td></td></tr><tr><td><code>login</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td>Por donde empezar.</td></tr><tr><td><code>pool</code></td><td><code>object</code></td><td><span class="req">siempre</span></td><td>Recuento de slots por estado.</td></tr></table><div class="note">Indice. No requiere token.</div><h4>Ejemplo de respuesta (real) &mdash; HTTP 200</h4><pre>{
+  "name": "PythonGetaway - MT5 Gateway",
+  "version": "2.0.0",
+  "mode": "multiusuario (pool de terminales)",
+  "docs": "/docs",
+  "openapi": "/openapi.json",
+  "health": "/health",
+  "login": "POST /auth/login",
+  "pool": {
+    "IDLE": 2
+  }
+}</pre></div><div class="ep"><span class="m get">GET</span> <span class="path">/health</span> <span class="notok">sin token</span><h3 style='margin-top:2mm'>Estado del gateway y del pool</h3><p>No requiere token: es el endpoint de sonda.</p><p>`available` es cuantos usuarios nuevos pueden autenticarse ahora mismo.</p><h4>Respuesta &mdash; <code>application/json</code> (HTTP 200)</h4><table><tr><th>Campo</th><th>Tipo</th><th>Presencia</th><th>Descripcion</th></tr><tr><td><code>status</code></td><td><code>string</code></td><td><span class="req">siempre</span></td><td>`ok` si queda algun slot libre, `saturado` si no.</td></tr><tr><td><code>pool</code></td><td><code>object</code></td><td><span class="req">siempre</span></td><td></td></tr><tr><td style='padding-left:5mm'><code>pool.size</code></td><td><code>integer (int64)</code></td><td></td><td>Numero total de slots (usuarios concurrentes maximos).</td></tr><tr><td style='padding-left:5mm'><code>pool.states</code></td><td><code>object</code></td><td></td><td>Recuento de slots por estado.</td></tr><tr><td style='padding-left:5mm'><code>pool.available</code></td><td><code>integer (int64)</code></td><td></td><td>Slots en IDLE: cuantos usuarios NUEVOS pueden autenticarse ahora mismo.</td></tr><tr><td style='padding-left:5mm'><code>pool.slots</code></td><td><code>array&lt;object&gt;</code></td><td></td><td>Detalle de cada slot.</td></tr><tr><td style='padding-left:10mm'><code>pool.slots[].slot_id</code></td><td><code>string</code></td><td></td><td>Identificador del slot.</td></tr><tr><td style='padding-left:10mm'><code>pool.slots[].state</code></td><td><code>string</code></td><td></td><td>COLD | WARMING | IDLE | BUSY | RECYCLING | FAILED. Solo los IDLE aceptan un login nuevo.</td></tr><tr><td style='padding-left:10mm'><code>pool.slots[].port</code></td><td><code>integer (int64)</code></td><td></td><td>Puerto local del worker. Uso interno; no se expone fuera.</td></tr><tr><td style='padding-left:10mm'><code>pool.slots[].login</code></td><td><code>integer (int64)?</code></td><td></td><td>Cuenta autenticada en este slot, o null si esta libre.</td></tr><tr><td style='padding-left:10mm'><code>pool.slots[].server</code></td><td><code>string?</code></td><td></td><td>Servidor del broker, o null si esta libre.</td></tr><tr><td style='padding-left:10mm'><code>pool.slots[].seconds_in_state</code></td><td><code>number (double)</code></td><td></td><td>Segundos que lleva en el estado actual.</td></tr><tr><td style='padding-left:10mm'><code>pool.slots[].error</code></td><td><code>string?</code></td><td></td><td>Motivo del fallo si el estado es FAILED.</td></tr><tr><td><code>sessions_active</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Sesiones de usuario vivas.</td></tr><tr><td><code>allow_real_account</code></td><td><code>boolean</code></td><td><span class="req">siempre</span></td><td>Si el trading esta permitido en cuentas REALES.</td></tr><tr><td><code>recycle_on_logout</code></td><td><code>boolean</code></td><td><span class="req">siempre</span></td><td>Si el terminal se reinicia al cerrar sesion.</td></tr><tr><td><code>session_ttl_seconds</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Vida maxima de un token.</td></tr><tr><td><code>session_idle_timeout_seconds</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Caducidad por inactividad.</td></tr></table><div class="note">Sonda del gateway. No requiere token. `available` es cuantos usuarios nuevos pueden autenticarse ahora mismo.</div><h4>Ejemplo de respuesta (real) &mdash; HTTP 200</h4><pre>{
+  "status": "ok",
+  "pool": {
+    "size": 2,
+    "states": {
+      "IDLE": 2
+    },
+    "available": 2,
+    "slots": [
+      {
+        "slot_id": "slot-1",
+        "state": "IDLE",
+        "port": 8101,
+        "login": null,
+        "server": null,
+        "seconds_in_state": 30.8,
+        "error": null
+      },
+      {
+        "slot_id": "slot-2",
+        "state": "IDLE",
+        "port": 8102,
+        "login": null,
+        "server": null,
+        "seconds_in_state": 30.8,
+        "error": null
+      }
+    ]
+  },
+  "sessions_active": 0,
+  "allow_real_account": false,
+  "recycle_on_logout": true,
+  "session_ttl_seconds": 3600,
+  "session_idle_timeout_seconds": 900
+}</pre></div><div class="ep"><span class="m get">GET</span> <span class="path">/pool</span> <span class="notok">sin token</span><h3 style='margin-top:2mm'>Detalle del pool de terminales</h3><p>Estado de cada slot. Util para operar y dimensionar.</p><h4>Respuesta &mdash; <code>application/json</code> (HTTP 200)</h4><table><tr><th>Campo</th><th>Tipo</th><th>Presencia</th><th>Descripcion</th></tr><tr><td><code>size</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Numero total de slots (usuarios concurrentes maximos).</td></tr><tr><td><code>states</code></td><td><code>object</code></td><td><span class="req">siempre</span></td><td>Recuento de slots por estado.</td></tr><tr><td><code>available</code></td><td><code>integer (int64)</code></td><td><span class="req">siempre</span></td><td>Slots en IDLE: cuantos usuarios NUEVOS pueden autenticarse ahora mismo.</td></tr><tr><td><code>slots</code></td><td><code>array&lt;object&gt;</code></td><td><span class="req">siempre</span></td><td>Detalle de cada slot.</td></tr><tr><td style='padding-left:5mm'><code>slots[].slot_id</code></td><td><code>string</code></td><td></td><td>Identificador del slot.</td></tr><tr><td style='padding-left:5mm'><code>slots[].state</code></td><td><code>string</code></td><td></td><td>COLD | WARMING | IDLE | BUSY | RECYCLING | FAILED. Solo los IDLE aceptan un login nuevo.</td></tr><tr><td style='padding-left:5mm'><code>slots[].port</code></td><td><code>integer (int64)</code></td><td></td><td>Puerto local del worker. Uso interno; no se expone fuera.</td></tr><tr><td style='padding-left:5mm'><code>slots[].login</code></td><td><code>integer (int64)?</code></td><td></td><td>Cuenta autenticada en este slot, o null si esta libre.</td></tr><tr><td style='padding-left:5mm'><code>slots[].server</code></td><td><code>string?</code></td><td></td><td>Servidor del broker, o null si esta libre.</td></tr><tr><td style='padding-left:5mm'><code>slots[].seconds_in_state</code></td><td><code>number (double)</code></td><td></td><td>Segundos que lleva en el estado actual.</td></tr><tr><td style='padding-left:5mm'><code>slots[].error</code></td><td><code>string?</code></td><td></td><td>Motivo del fallo si el estado es FAILED.</td></tr></table><div class="note">Estado de cada terminal del pool. Util para operar y dimensionar.</div><h4>Ejemplo de respuesta (real) &mdash; HTTP 200</h4><pre>{
+  "size": 2,
+  "states": {
+    "IDLE": 2
+  },
+  "available": 2,
+  "slots": [
+    {
+      "slot_id": "slot-1",
+      "state": "IDLE",
+      "port": 8101,
+      "login": null,
+      "server": null,
+      "seconds_in_state": 30.8,
+      "error": null
+    },
+    {
+      "slot_id": "slot-2",
+      "state": "IDLE",
+      "port": 8102,
+      "login": null,
+      "server": null,
+      "seconds_in_state": 30.8,
+      "error": null
+    }
+  ]
+}</pre></div>
+<h2>2. Arrancar y parar</h2>
+<p>Dos comandos. El primero levanta el gateway, que a su vez provisiona y arranca
+<b>el pool completo</b>: un terminal MT5 y un proceso worker por cada usuario concurrente.</p>
+
+<h3>Arrancar todo</h3>
+<div class="cmd">cd /home/borislav/Desktop/TradingAI/PythonGetaway
+./scripts/start.sh</div>
+<p>No devuelve el control hasta que hay al menos un slot disponible. El primer arranque tarda
+mas: clona la instalacion de MT5 una vez por slot.</p>
+
+<h4>Opciones</h4>
+<table>
+  <tr><th>Opcion</th><th>Efecto</th></tr>
+  <tr><td><code>--pool 5</code></td><td>Usuarios concurrentes (por defecto <b>3</b>). Cada uno cuesta ~400&nbsp;MB de RAM.</td></tr>
+  <tr><td><code>--port 9000</code></td><td>Puerto publico (por defecto <code>8000</code>).</td></tr>
+  <tr><td><code>--host 0.0.0.0</code></td><td>Escuchar en toda la red. Por defecto solo <code>127.0.0.1</code>.</td></tr>
+  <tr><td><code>--allow-real</code></td><td>Permitir operar en cuentas REALES. Por defecto se bloquea con 403.</td></tr>
+  <tr><td><code>--foreground</code></td><td>No daemonizar: logs en la terminal, Ctrl+C para parar.</td></tr>
+</table>
+
+<h3>Parar todo</h3>
+<div class="cmd">cd /home/borislav/Desktop/TradingAI/PythonGetaway
+./scripts/stop.sh</div>
+<p>Para el gateway (que cierra su pool de forma ordenada) y despues barre cualquier terminal o
+worker que hubiera quedado suelto. Las instancias MT5 clonadas se conservan para el proximo
+arranque.</p>
+
+<h3>Comprobar que esta vivo</h3>
+<div class="cmd">curl http://127.0.0.1:8000/health     # estado del gateway y del pool
+curl http://127.0.0.1:8000/pool       # detalle de cada slot</div>
+
+<h3>Probarlo de punta a punta</h3>
+<div class="cmd"># solo lo que no necesita cuenta (gateway, pool, rutas de error)
+python3 scripts/selftest.py
+
+# completo: hace login real y prueba los 41 endpoints de cuenta
+PYGW_TEST_LOGIN=5054767214 PYGW_TEST_PASSWORD='...' PYGW_TEST_SERVER=MetaQuotes-Demo \
+  python3 scripts/selftest.py
+
+# completo pero sin enviar ninguna orden
+... python3 scripts/selftest.py --no-trading</div>
+<div class="warn"><b>Aviso:</b> sin <code>--no-trading</code> el selftest abre y cierra posiciones
+reales en la cuenta indicada. Se niega a operar si la cuenta no es DEMO. La contrasena se lee del
+entorno y nunca se imprime ni se guarda en los ejemplos.</div>
+
+<h3>Recursos en marcha</h3>
+<table>
+  <tr><th>Recurso</th><th>URL</th></tr>
+  <tr><td>API</td><td><code>http://127.0.0.1:8000</code></td></tr>
+  <tr><td>Swagger UI (interactivo)</td><td><code>http://127.0.0.1:8000/docs</code></td></tr>
+  <tr><td>Esquema OpenAPI</td><td><code>http://127.0.0.1:8000/openapi.json</code></td></tr>
+  <tr><td>Log del gateway</td><td><code>logs/gateway.log</code></td></tr>
+  <tr><td>Log de cada slot</td><td><code>logs/slot-N-worker.log</code>, <code>logs/slot-N-terminal.log</code></td></tr>
+</table>
+
+<h2>3. Como esta montado (y por que)</h2>
+
+<div class="warn"><b>El problema que resuelve esta arquitectura.</b> La libreria
+<code>MetaTrader5</code> de Python es un <b>singleton de proceso</b>: <code>mt5.login()</code>
+cambia la cuenta de <i>todo el proceso y de su terminal</i>. Si varios usuarios compartieran
+proceso, el login de uno cambiaria la sesion de otro, y un &laquo;cerrar posicion&raquo; podria
+ejecutarse <b>contra la cuenta equivocada</b>. Verificado: dos procesos atados al mismo terminal
+comparten cuenta.</div>
+
+<p>Por eso cada sesion recibe <b>su propio terminal MT5 y su propio proceso</b>. Es la unica forma
+de servir N cuentas a la vez.</p>
+
+<div class="cmd">Cliente .NET  (usuario A)     Cliente .NET  (usuario B)
+      |                              |
+      |  HTTP + Authorization: Bearer &lt;token&gt;
+      v                              v
+ +---------------------------------------------+
+ |   GATEWAY  (Python de Linux, async)         |   /auth/*, sesiones, pool
+ +---------------------------------------------+
+      |  reenvio interno por localhost
+      v                              v
+ WORKER slot-1 (Wine)          WORKER slot-2 (Wine)
+      |                              |
+ terminal MT5 propio           terminal MT5 propio
+ data_path: C:\mt5-instances\slot-1   ...\slot-2
+      |                              |
+ cuenta del usuario A          cuenta del usuario B</div>
+
+<p>El <b>gateway</b> corre en el Python de Linux: solo enruta, no necesita la libreria MT5 y gana
+concurrencia real. Los <b>workers</b> corren bajo Wine, que es donde vive la DLL del terminal.</p>
+
+<h3>Coste por usuario concurrente</h3>
+<table>
+  <tr><th>Recurso</th><th>Coste</th><th>Comentario</th></tr>
+  <tr><td>RAM</td><td>~400 MB</td><td>~265 MB el terminal + ~135 MB el worker</td></tr>
+  <tr><td>Disco</td><td>~300 MB</td><td>Clon de la instalacion, mas la cache de historico que descargue</td></tr>
+  <tr><td>Arranque</td><td>10-20 s</td><td>Ocurre al calentar el pool, <b>no</b> dentro del login</td></tr>
+  <tr><td>Login</td><td>1-3 s</td><td>El terminal ya esta caliente: solo se autentica</td></tr>
+</table>
+<p>Dimensiona <code>--pool</code> con la RAM disponible. Para mas usuarios de los que quepan en una
+maquina, replica el gateway completo detras de un balanceador: cada instancia gestiona su propio
+pool y las sesiones son independientes.</p>
+
+<h3>Estados de un slot</h3>
+<table>
+  <tr><th>Estado</th><th>Significado</th></tr>
+  <tr><td><code>COLD</code></td><td>Sin procesos.</td></tr>
+  <tr><td><code>WARMING</code></td><td>Terminal y worker arrancando.</td></tr>
+  <tr><td><code>IDLE</code></td><td>Listo y sin cuenta: disponible para un login.</td></tr>
+  <tr><td><code>BUSY</code></td><td>Autenticado con una cuenta concreta.</td></tr>
+  <tr><td><code>RECYCLING</code></td><td>Cerrando sesion y reiniciando el terminal.</td></tr>
+  <tr><td><code>FAILED</code></td><td>No se pudo levantar. El motivo va en <code>error</code>.</td></tr>
+</table>
+
+<h3>Variables de entorno</h3>
+<table>
+  <tr><th>Variable</th><th>Por defecto</th><th>Para que sirve</th></tr>
+  <tr><td><code>PYGW_HOST</code> / <code>PYGW_PORT</code></td><td><code>127.0.0.1</code> / <code>8000</code></td><td>Interfaz y puerto publicos.</td></tr>
+  <tr><td><code>PYGW_POOL_SIZE</code></td><td><code>3</code></td><td>Usuarios concurrentes.</td></tr>
+  <tr><td><code>PYGW_SESSION_TTL</code></td><td><code>3600</code></td><td>Vida maxima de un token, en segundos.</td></tr>
+  <tr><td><code>PYGW_SESSION_IDLE</code></td><td><code>900</code></td><td>Caducidad por inactividad. Libera el slot solo.</td></tr>
+  <tr><td><code>PYGW_RECYCLE_ON_LOGOUT</code></td><td><code>1</code></td><td>Reiniciar el terminal al cerrar sesion para que no quede ninguna cuenta conectada.</td></tr>
+  <tr><td><code>PYGW_ALLOW_REAL</code></td><td><code>0</code></td><td>Si es <code>0</code> y la cuenta es REAL, el trading devuelve <b>403</b>. La lectura sigue funcionando.</td></tr>
+  <tr><td><code>PYGW_MAX_LOGIN_ATTEMPTS</code></td><td><code>5</code></td><td>Intentos fallidos por cuenta antes de devolver 429.</td></tr>
+  <tr><td><code>PYGW_MAGIC</code></td><td><code>20260910</code></td><td>Magic number por defecto de las ordenes.</td></tr>
+  <tr><td><code>PYGW_DEVIATION</code></td><td><code>20</code></td><td>Slippage maximo por defecto, en puntos.</td></tr>
+</table>
+
+<h2>4. Autenticacion en detalle</h2>
+
+<p>Cada usuario aporta <b>sus propias credenciales MT5</b>. El flujo tiene tres pasos:</p>
+
+<div class="cmd">1. POST /auth/login   {login, password, server}   -> { "token": "...", ... }
+2. Cualquier endpoint  con  Authorization: Bearer &lt;token&gt;
+3. POST /auth/logout  (o dejar que caduque)      -> libera el terminal</div>
+
+<h3>4.1 Que pasa con la contrasena</h3>
+<div class="ok"><b>No se guarda en ningun sitio.</b> Viaja una sola vez del cliente al worker, se
+usa para autenticar el terminal y se descarta. No se escribe en disco, ni en los logs, ni queda en
+memoria del gateway. Lo unico que persiste mientras dura la sesion es el token y a que slot apunta.</div>
+<p><b>Consecuencia asumida:</b> si el gateway se reinicia, todos los usuarios vuelven a
+autenticarse. Es el precio de no ser un almacen de credenciales.</p>
+
+<div class="warn"><b>TLS es obligatorio si sales de localhost.</b> Con
+<code>--host 0.0.0.0</code> y sin HTTPS delante, las credenciales MT5 de tus usuarios viajan
+<b>en claro</b>. Pon un reverse proxy (nginx, Caddy, Traefik) con certificado. El gateway no
+termina TLS por si mismo, a proposito: esa responsabilidad es del proxy.</div>
+
+<h3>4.2 Ciclo de vida del token</h3>
+<table>
+  <tr><th>Concepto</th><th>Valor por defecto</th><th>Detalle</th></tr>
+  <tr><td>Vida maxima</td><td>3600 s</td><td>Desde el login, pase lo que pase.</td></tr>
+  <tr><td>Inactividad</td><td>900 s</td><td>Ventana <b>deslizante</b>: cada peticion la renueva.</td></tr>
+  <tr><td>Caducidad efectiva</td><td>&mdash;</td><td>La que llegue antes de las dos. Va en <code>expires_at</code> / <code>expires_in</code>.</td></tr>
+  <tr><td>Al caducar</td><td>&mdash;</td><td>Un barrido cierra la sesion y <b>libera el slot</b>. Sin esto, un cliente que se desconecta sin logout agotaria el pool.</td></tr>
+</table>
+<p>Un login con una cuenta que <b>ya tiene sesion viva</b> devuelve la misma sesion
+(<code>reused: true</code>) en lugar de consumir un segundo slot.</p>
+
+<h3>4.3 Errores especificos de autenticacion</h3>
+<table>
+  <tr><th>HTTP</th><th><code>code</code></th><th>Que hacer</th></tr>
+  <tr><td>401</td><td><code>MISSING_TOKEN</code></td><td>Falta la cabecera <code>Authorization</code>.</td></tr>
+  <tr><td>401</td><td><code>INVALID_OR_EXPIRED_TOKEN</code></td><td>Volver a <code>/auth/login</code>.</td></tr>
+  <tr><td>401</td><td><code>MT5_LOGIN_FAILED</code></td><td>Credenciales o servidor incorrectos. <code>detail.error.mt5_code</code> trae el codigo de MT5 (<code>-6</code> = Authorization failed).</td></tr>
+  <tr><td>429</td><td><code>TOO_MANY_LOGIN_ATTEMPTS</code></td><td>5 fallos en 5 minutos para esa cuenta. Esperar.</td></tr>
+  <tr><td>503</td><td><code>POOL_EXHAUSTED</code></td><td>No hay terminales libres. Cerrar sesiones o subir <code>--pool</code>. <code>detail</code> trae el estado del pool.</td></tr>
+  <tr><td>409</td><td><code>SESSION_SLOT_LOST</code></td><td>El terminal de esa sesion se reinicio. Volver a autenticarse.</td></tr>
+  <tr><td>403</td><td><code>REAL_ACCOUNT_BLOCKED</code></td><td>Cuenta REAL sin <code>PYGW_ALLOW_REAL=1</code>. La lectura sigue funcionando.</td></tr>
+</table>
+
+<h3>4.4 Cabeceras que devuelve el gateway</h3>
+<p>Toda respuesta proxificada lleva <code>X-Slot-Id</code> y <code>X-Account-Login</code>: sirven
+para depurar y para confirmar contra que cuenta se ejecuto la llamada.</p>
+
+<h3>4.5 Ejemplo completo en C#</h3>
+<div class="cmd">var http = new HttpClient { BaseAddress = new Uri("https://tu-host/") };
+
+// 1. login
+var login = await http.PostAsJsonAsync("auth/login", new {
+    login = 5054767214L, password = pass, server = "MetaQuotes-Demo" });
+var session = await login.Content.ReadFromJsonAsync&lt;SessionDto&gt;();
+
+// 2. el token va en TODAS las llamadas siguientes
+http.DefaultRequestHeaders.Authorization =
+    new AuthenticationHeaderValue("Bearer", session.Token);
+
+var account = await http.GetFromJsonAsync&lt;JsonElement&gt;("account");
+var open = await http.PostAsJsonAsync("trading/open", new {
+    symbol = "EURUSD", side = "BUY", volume = 0.10, sl_points = 300 });
+
+// 3. comprobar SIEMPRE success, no solo el codigo HTTP
+var result = await open.Content.ReadFromJsonAsync&lt;JsonElement&gt;();
+if (!result.GetProperty("success").GetBoolean())
+    throw new Exception(result.GetProperty("retcode_name").GetString());
+
+// 4. liberar el terminal al terminar
+await http.PostAsync("auth/logout", null);</div>
+
+<h2>5. Convenciones de datos</h2>
+
+<h3>5.1 Fechas y horas</h3>
+<p>MT5 devuelve los tiempos como <b>epoch en segundos</b>, pero medidos con el reloj del
+<b>servidor del broker</b>, no en UTC. El gateway <b>no inventa</b> una conversion de zona horaria.
+Cada campo temporal se expone dos veces:</p>
+<table>
+  <tr><th>Campo</th><th>Tipo</th><th>Ejemplo</th><th>Significado</th></tr>
+  <tr><td><code>time</code></td><td>integer (int64)</td><td><code>1789037400</code></td><td>Epoch crudo, tal cual lo da MT5.</td></tr>
+  <tr><td><code>time_iso</code></td><td>string</td><td><code>"2026-09-10T14:30:00"</code></td><td>El mismo instante formateado, <b>sin</b> sufijo <code>Z</code>.</td></tr>
+  <tr><td><code>time_msc</code></td><td>integer (int64)</td><td><code>1789037400123</code></td><td>Epoch en <b>milisegundos</b> (ticks y deals).</td></tr>
+</table>
+<div class="note"><b>En .NET:</b> deserializa <code>time_iso</code> como <code>DateTime</code> con
+<code>DateTimeKind.Unspecified</code>. La ausencia deliberada de <code>Z</code> senala que es hora
+de servidor. Si necesitas UTC real, aplica el offset de tu broker. Para los parametros
+<code>*_epoch</code> de entrada, envia siempre el epoch en segundos.</div>
+
+<h3>5.2 Formato de error (identico en gateway y workers)</h3>
+<pre>{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "No hay ninguna posicion abierta con ticket 999999999.",
+    "mt5_code": null,
+    "detail": null
+  }
+}</pre>
+<table>
+  <tr><th>HTTP</th><th><code>code</code></th><th>Cuando</th></tr>
+  <tr><td>400</td><td><code>BAD_REQUEST</code></td><td>Parametro invalido (volumen fuera de rango, timeframe inexistente, rango de fechas al reves).</td></tr>
+  <tr><td>404</td><td><code>NOT_FOUND</code></td><td>Ticket o simbolo inexistente.</td></tr>
+  <tr><td>422</td><td>(FastAPI)</td><td>El cuerpo JSON no cumple el esquema. Formato propio de FastAPI.</td></tr>
+  <tr><td>500</td><td><code>INTERNAL_ERROR</code></td><td>Fallo no previsto. Queda en los logs.</td></tr>
+  <tr><td>502</td><td><code>MT5_ERROR</code> / <code>WORKER_UNREACHABLE</code></td><td>MT5 devolvio error, o el worker no responde.</td></tr>
+  <tr><td>503</td><td><code>NOT_CONNECTED</code></td><td>El terminal perdio la conexion con el broker.</td></tr>
+  <tr><td>504</td><td><code>WORKER_TIMEOUT</code></td><td>El worker no respondio a tiempo.</td></tr>
+</table>
+
+<h3>5.3 Resultado de las ordenes &mdash; el punto que mas confunde</h3>
+<div class="warn"><b>Un HTTP 200 no significa que la orden se haya ejecutado.</b>
+Significa que MT5 recibio la peticion y respondio. Comprueba <b>siempre</b> el campo
+<code>success</code> (o <code>retcode</code>).</div>
+<table>
+  <tr><th>Campo</th><th>Tipo</th><th>Significado</th></tr>
+  <tr><td><code>success</code></td><td>boolean</td><td><code>true</code> solo con retcode 10008, 10009 o 10010.</td></tr>
+  <tr><td><code>retcode</code></td><td>integer</td><td>Codigo devuelto por el servidor de trading.</td></tr>
+  <tr><td><code>retcode_name</code></td><td>string</td><td>El mismo codigo en texto: <code>DONE</code>, <code>NO_MONEY</code>, <code>INVALID_STOPS</code>...</td></tr>
+  <tr><td><code>order</code></td><td>integer (int64)</td><td>Ticket de la orden generada.</td></tr>
+  <tr><td><code>deal</code></td><td>integer (int64)</td><td>Ticket del deal (la ejecucion real).</td></tr>
+  <tr><td><code>position</code></td><td>integer (int64)</td><td>Ticket de la posicion resultante. <b>Es el que usaras</b> para cerrar o mover SL/TP.</td></tr>
+  <tr><td><code>volume</code></td><td>number</td><td>Volumen realmente ejecutado.</td></tr>
+  <tr><td><code>price</code></td><td>number</td><td>Precio real de ejecucion.</td></tr>
+  <tr><td><code>request</code></td><td>object</td><td>Lo que el gateway envio de verdad a MT5. Util para depurar.</td></tr>
+</table>
+<div class="note"><code>/trading/check</code> es la excepcion: al no enviar nada, su exito es
+<code>retcode == 0</code> (<code>retcode_name: "OK"</code>).</div>
+
+<h3>5.4 Volumenes y precios</h3>
+<ul>
+  <li>El <b>volumen</b> se ajusta al <code>volume_step</code> del simbolo <b>siempre hacia abajo</b>.
+      Redondear hacia arriba aumentaria el riesgo sin que el cliente lo pida. Si el resultado queda
+      por debajo de <code>volume_min</code>, la peticion se rechaza con <b>400</b>.</li>
+  <li><b>SL y TP</b> se envian como <b>precio absoluto</b>. En <code>/trading/open</code> tambien
+      se aceptan como distancia en puntos (<code>sl_points</code>, <code>tp_points</code>);
+      si mandas ambos, gana el precio absoluto.</li>
+  <li>Un <b>punto</b> es <code>symbol_info.point</code>. Para EURUSD de 5 digitos,
+      1 punto = 0,00001, luego <b>1 pip = 10 puntos</b>.</li>
+  <li>Para <b>quitar</b> un SL o un TP, envia <code>0</code>. Para <b>dejarlo como esta</b>,
+      envia <code>null</code> u omite el campo.</li>
+</ul>
+
+<h3>5.5 Generar el cliente .NET automaticamente</h3>
+<p>El gateway publica un esquema OpenAPI 3.1 completo (auth + los 41 endpoints de cuenta), con el
+esquema de seguridad <code>bearerAuth</code> ya declarado:</p>
+<div class="cmd">nswag openapi2csclient /input:http://127.0.0.1:8000/openapi.json \
+                       /classname:Mt5Client /namespace:PythonGetaway /output:Mt5Client.cs
+
+# o Refitter
+refitter --namespace PythonGetaway http://127.0.0.1:8000/openapi.json</div>
+<div class="note">Las respuestas de lectura se devuelven como objetos JSON abiertos: los campos que
+publica MT5 varian entre brokers y builds del terminal, y cerrar el esquema haria que el gateway
+<b>perdiera</b> campos que el broker si esta enviando. Si prefieres tipos estrictos en .NET,
+modela solo los campos que uses y deja el resto en un
+<code>Dictionary&lt;string, JsonElement&gt;</code>.</div>
+<h2>6. Referencia del resto de endpoints (41)</h2><table class='toc'><tr><th>Grupo</th><th>Endpoints</th></tr><tr><td><b>Cuenta, terminal y estado</b></td><td>5</td></tr><tr><td><b>Simbolos</b></td><td>4</td></tr><tr><td><b>Datos de mercado</b></td><td>8</td></tr><tr><td><b>Posiciones abiertas</b></td><td>3</td></tr><tr><td><b>Ordenes pendientes</b></td><td>3</td></tr><tr><td><b>Historico</b></td><td>5</td></tr><tr><td><b>Trading manual</b></td><td>13</td></tr></table><h2>6.1 Cuenta, terminal y estado</h2><div class="ep"><span class="m get">GET</span> <span class="path">/account</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Datos completos de la cuenta</h3><p>Balance, equity, margen, apalancamiento, divisa, tipo de cuenta...</p><p>`trade_mode` 0=DEMO 1=CONTEST 2=REAL (tambien como `trade_mode_name`).</p><div class="note">Sin cabecera Authorization.</div><h4>Ejemplo de ERROR (real, capturado) &mdash; HTTP 401</h4><pre>{
+  "error": {
+    "code": "MISSING_TOKEN",
+    "message": "Falta la cabecera 'Authorization: Bearer &lt;token&gt;'. Obten un token en POST /auth/login.",
+    "mt5_code": null,
+    "detail": null
+  }
+}</pre></div><div class="ep"><span class="m get">GET</span> <span class="path">/config</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Configuracion efectiva del gateway</h3><p>Lo que el gateway tiene cargado. Nunca expone la contrasena.</p><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/last-error</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Ultimo error de la libreria MT5</h3><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/terminal</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Datos del terminal MT5</h3><p>Build, rutas, permisos (trade_allowed, dlls_allowed), ping, trafico...</p><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/version</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Version de la API de MetaTrader5</h3><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><h2>6.2 Simbolos</h2><div class="ep"><span class="m get">GET</span> <span class="path">/symbols</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Lista de simbolos del broker</h3><p>Con `names_only=false` y sin `group` esto devuelve MUCHOS megas -- el
+broker de prueba expone &gt;12.000 simbolos. Filtra siempre que puedas.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>group</code></td><td>query</td><td><code>string?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Filtro estilo MT5, admite comodines. Ej: `*USD*`, `*,!*EUR*` (todos menos los que lleven EUR).</td></tr><tr><td><code>only_visible</code></td><td>query</td><td><code>boolean</code></td><td><span class="opt">no</span></td><td><code>false</code></td><td>true = solo los que estan en Market Watch.</td></tr><tr><td><code>names_only</code></td><td>query</td><td><code>boolean</code></td><td><span class="opt">no</span></td><td><code>true</code></td><td>true = solo nombres (rapido). false = especificacion completa de cada simbolo (pesado: son miles).</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/symbols/total</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Numero total de simbolos</h3><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/symbols/{symbol}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Especificacion completa de un simbolo</h3><p>Digitos, punto, spread, volumenes min/max/step, margen, swaps, sesion,
+modo de llenado permitido, divisas base/beneficio... todo lo que MT5 sabe.</p><p>Selecciona el simbolo en Market Watch si aun no lo estaba.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>path</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/symbols/{symbol}/select</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Anadir o quitar un simbolo del Market Watch</h3><p>Un simbolo que no esta en Market Watch no devuelve cotizaciones ni velas.
+Los endpoints de lectura ya lo seleccionan solos; esto es control manual.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>path</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr><tr><td><code>enable</code></td><td>query</td><td><code>boolean</code></td><td><span class="opt">no</span></td><td><code>true</code></td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><h2>6.3 Datos de mercado</h2><div class="ep"><span class="m get">GET</span> <span class="path">/market/book/{symbol}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Profundidad de mercado (DOM / Level II)</h3><p>Suscribe el simbolo al libro, lee y devuelve los niveles.</p><p>Muchos brokers de Forex retail NO publican profundidad: en ese caso
+`entries` viene vacio y `subscribed` indica si la suscripcion se acepto.
+No es un error del gateway.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>path</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/market/candles/{symbol}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Velas OHLCV por posicion (las N mas recientes)</h3><p>La vela de indice 0 es la que se esta formando AHORA y cambia a cada tick.</p><p>Si vas a tomar decisiones sobre velas cerradas, usa `include_current=false`
+(equivale a pedir desde `start_pos=1`).</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>path</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr><tr><td><code>timeframe</code></td><td>query</td><td><code>string</code></td><td><span class="opt">no</span></td><td><code>"M15"</code></td><td>Timeframe: M1, M2, M3, M4, M5, M6, M10, M12, M15, M20, M30, H1, H2, H3, H4, H6, H8, H12, D1, W1, MN1</td></tr><tr><td><code>count</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="opt">no</span></td><td><code>500</code></td><td>Numero de velas.</td></tr><tr><td><code>start_pos</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="opt">no</span></td><td><code>0</code></td><td>0 = la vela EN CURSO (aun sin cerrar). 1 = la ultima vela cerrada.</td></tr><tr><td><code>include_current</code></td><td>query</td><td><code>boolean</code></td><td><span class="opt">no</span></td><td><code>true</code></td><td>false = descarta la vela en formacion. Util para no operar con una vela incompleta.</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/market/candles/{symbol}/from</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Velas OHLCV desde una fecha</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>path</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr><tr><td><code>timeframe</code></td><td>query</td><td><code>string</code></td><td><span class="opt">no</span></td><td><code>"M15"</code></td><td>Timeframe: M1, M2, M3, M4, M5, M6, M10, M12, M15, M20, M30, H1, H2, H3, H4, H6, H8, H12, D1, W1, MN1</td></tr><tr><td><code>from_epoch</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td>Epoch en segundos (hora de servidor).</td></tr><tr><td><code>count</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="opt">no</span></td><td><code>500</code></td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/market/candles/{symbol}/range</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Velas OHLCV entre dos fechas</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>path</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr><tr><td><code>timeframe</code></td><td>query</td><td><code>string</code></td><td><span class="opt">no</span></td><td><code>"M15"</code></td><td>Timeframe: M1, M2, M3, M4, M5, M6, M10, M12, M15, M20, M30, H1, H2, H3, H4, H6, H8, H12, D1, W1, MN1</td></tr><tr><td><code>from_epoch</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td>Epoch en segundos (hora de servidor).</td></tr><tr><td><code>to_epoch</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td>Epoch en segundos (hora de servidor).</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/market/tick/{symbol}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Ultimo tick (cotizacion actual)</h3><p>bid, ask, last, volume, spread calculado y hora del tick.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>path</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/market/ticks</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Ultimo tick de varios simbolos a la vez</h3><p>Una sola llamada en lugar de N. Los simbolos que fallen se reportan en
+`errors` en vez de tumbar la peticion entera.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbols</code></td><td>query</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td>Nombres separados por coma. Ej: `EURUSD,GBPUSD,USDJPY`</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/market/ticks/{symbol}/from</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Ticks crudos desde una fecha</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>path</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr><tr><td><code>from_epoch</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td>Epoch en segundos (hora de servidor).</td></tr><tr><td><code>count</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="opt">no</span></td><td><code>1000</code></td><td></td></tr><tr><td><code>flags</code></td><td>query</td><td><code>string</code></td><td><span class="opt">no</span></td><td><code>"ALL"</code></td><td>ALL | INFO | TRADE. ALL devuelve todos los ticks.</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/market/ticks/{symbol}/range</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Ticks crudos entre dos fechas</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>path</td><td><code>string</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr><tr><td><code>from_epoch</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr><tr><td><code>to_epoch</code></td><td>query</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr><tr><td><code>flags</code></td><td>query</td><td><code>string</code></td><td><span class="opt">no</span></td><td><code>"ALL"</code></td><td>ALL | INFO | TRADE</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><h2>6.4 Posiciones abiertas</h2><div class="ep"><span class="m get">GET</span> <span class="path">/positions</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Posiciones abiertas</h3><p>`symbol` y `group` son mutuamente excluyentes: si mandas los dos, manda
+`symbol`. `profit` ya viene neto de swap? No: `profit` es el flotante SIN
+swap ni comision -- esos van en sus propios campos.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>query</td><td><code>string?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Filtrar por simbolo exacto.</td></tr><tr><td><code>group</code></td><td>query</td><td><code>string?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Filtro con comodines. Ej: `*USD*`</td></tr><tr><td><code>magic</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Filtrar por magic number (se aplica en el gateway).</td></tr></table><div class="note">Token inexistente o caducado.</div><h4>Ejemplo de ERROR (real, capturado) &mdash; HTTP 401</h4><pre>{
+  "error": {
+    "code": "INVALID_OR_EXPIRED_TOKEN",
+    "message": "El token no existe o ha caducado. Vuelve a autenticarte.",
+    "mt5_code": null,
+    "detail": null
+  }
+}</pre></div><div class="ep"><span class="m get">GET</span> <span class="path">/positions/total</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Numero de posiciones abiertas</h3><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/positions/{ticket}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Una posicion por ticket</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>ticket</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><h2>6.5 Ordenes pendientes</h2><div class="ep"><span class="m get">GET</span> <span class="path">/orders</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Ordenes pendientes activas</h3><p>Solo ordenes VIVAS (limit/stop aun no activadas). Las ya ejecutadas o
+canceladas estan en `/history/orders`.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td>query</td><td><code>string?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr><tr><td><code>group</code></td><td>query</td><td><code>string?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Filtro con comodines. Ej: `*USD*`</td></tr><tr><td><code>magic</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/orders/total</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Numero de ordenes pendientes</h3><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/orders/{ticket}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Una orden pendiente por ticket</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>ticket</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><h2>6.6 Historico</h2><div class="ep"><span class="m get">GET</span> <span class="path">/history/deals</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Deals historicos (las ejecuciones reales)</h3><p>Un deal es un hecho consumado (entrada o salida). El P&amp;L realizado de una
+posicion es la suma de `profit + swap + commission + fee` de sus deals.</p><p>Los movimientos de saldo (deposito, retirada) tambien aparecen aqui, con
+`type_name = "BALANCE"`.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>from_epoch</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Epoch s. Por defecto: hace 30 dias.</td></tr><tr><td><code>to_epoch</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Epoch s. Por defecto: ahora + 1 dia.</td></tr><tr><td><code>symbol</code></td><td>query</td><td><code>string?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr><tr><td><code>group</code></td><td>query</td><td><code>string?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr><tr><td><code>ticket</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr><tr><td><code>position</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Todos los deals de una posicion: sirve para reconstruir su P&amp;L real.</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/history/deals/total</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Numero de deals en un rango</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>from_epoch</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr><tr><td><code>to_epoch</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/history/orders</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Ordenes historicas (ejecutadas, canceladas, expiradas)</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>from_epoch</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Epoch s. Por defecto: hace 30 dias.</td></tr><tr><td><code>to_epoch</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Epoch s. Por defecto: ahora + 1 dia.</td></tr><tr><td><code>symbol</code></td><td>query</td><td><code>string?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr><tr><td><code>group</code></td><td>query</td><td><code>string?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Filtro con comodines, ej. `*USD*`</td></tr><tr><td><code>ticket</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Una orden concreta (ignora el rango de fechas).</td></tr><tr><td><code>position</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td>Todas las ordenes de una posicion (ignora el rango).</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/history/orders/total</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Numero de ordenes historicas en un rango</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>from_epoch</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr><tr><td><code>to_epoch</code></td><td>query</td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m get">GET</span> <span class="path">/history/position/{position_id}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Vida completa de una posicion cerrada</h3><p>Reune las ordenes y los deals de una posicion y calcula su P&amp;L realizado.</p><p>Es la forma comoda de auditar "que paso exactamente con el ticket X".</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>position_id</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><h2>6.7 Trading manual</h2><div class="ep"><span class="m post">POST</span> <span class="path">/trading/calc-margin</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Margen requerido por una operacion</h3><p>Cuanto margen bloquearia la operacion. No envia nada al mercado.</p><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td><code>string</code></td><td><span class="req">si</span></td><td></td></tr><tr><td><code>side</code></td><td><code>"BUY" | "SELL"</code></td><td><span class="req">si</span></td><td></td></tr><tr><td><code>volume</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td></td></tr><tr><td><code>price</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Precio de referencia. null = precio de mercado actual.</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/calc-profit</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Beneficio teorico de una operacion</h3><p>P&amp;L que daria ir de `price_open` a `price_close`. No envia nada.</p><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td><code>string</code></td><td><span class="req">si</span></td><td></td></tr><tr><td><code>side</code></td><td><code>"BUY" | "SELL"</code></td><td><span class="req">si</span></td><td></td></tr><tr><td><code>volume</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td></td></tr><tr><td><code>price_open</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td></td></tr><tr><td><code>price_close</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/check</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Validar una orden SIN enviarla</h3><p>Simula la orden contra el servidor: dice si pasaria, cuanto margen
+consumiria y como quedaria el balance. **No envia nada al mercado.**</p><p>Es la forma segura de validar desde .NET antes de ejecutar de verdad.</p><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td><code>string</code></td><td><span class="req">si</span></td><td>Nombre exacto del simbolo en el broker.</td></tr><tr><td><code>side</code></td><td><code>"BUY" | "SELL"</code></td><td><span class="req">si</span></td><td>BUY o SELL. Ejecucion a mercado.</td></tr><tr><td><code>volume</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td>Lotes. Se ajusta al volume_step del simbolo, siempre hacia abajo.</td></tr><tr><td><code>sl</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Stop Loss como PRECIO absoluto. null = sin SL.</td></tr><tr><td><code>tp</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Take Profit como PRECIO absoluto. null = sin TP.</td></tr><tr><td><code>sl_points</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Alternativa a `sl`: distancia en puntos desde el precio de entrada. Se ignora si `sl` viene informado.</td></tr><tr><td><code>tp_points</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Alternativa a `tp`: distancia en puntos desde el precio de entrada.</td></tr><tr><td><code>deviation</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Slippage maximo aceptado, en puntos. Por defecto el del gateway (20).</td></tr><tr><td><code>magic</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Magic number de la orden. Por defecto el del gateway.</td></tr><tr><td><code>comment</code></td><td><code>string?</code></td><td><span class="opt">no</span></td><td>Comentario libre. MT5 lo trunca a 31 caracteres.</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/close-all</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Cerrar todas las posiciones (opcionalmente filtradas)</h3><p>Cierra en bloque. Devuelve el resultado de CADA cierre por separado: si
+una falla, las demas siguen adelante y el fallo queda registrado.</p><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td><code>string?</code></td><td><span class="opt">no</span></td><td>Cerrar solo las posiciones de este simbolo. null = todas.</td></tr><tr><td><code>magic</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Cerrar solo las posiciones con este magic. null = cualquiera.</td></tr><tr><td><code>comment</code></td><td><code>string?</code></td><td><span class="opt">no</span></td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/close-partial/{ticket}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Cerrar parcialmente una posicion</h3><p>Igual que `/trading/close/{ticket}` pero `volume` es OBLIGATORIO.</p><p>Existe como endpoint propio porque es la operacion que mas se usa desde un
+cliente y asi el contrato es explicito.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>ticket</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td>Ticket de la posicion abierta.</td></tr></table><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>volume</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Volumen a cerrar. null o ausente = cerrar la posicion ENTERA.</td></tr><tr><td><code>deviation</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Slippage maximo en puntos.</td></tr><tr><td><code>comment</code></td><td><code>string?</code></td><td><span class="opt">no</span></td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/close/{ticket}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Cerrar posicion (total o parcial)</h3><p>Sin `volume` cierra la posicion entera. Con `volume` menor que el de la
+posicion hace un CIERRE PARCIAL y el resto sigue abierto.</p><p>En cuentas *hedging* el cierre parcial deja la posicion original con el
+volumen restante y su mismo ticket. En cuentas *netting* el resultado es
+una unica posicion neta.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>ticket</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td>Ticket de la posicion abierta.</td></tr></table><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>volume</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Volumen a cerrar. null o ausente = cerrar la posicion ENTERA.</td></tr><tr><td><code>deviation</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Slippage maximo en puntos.</td></tr><tr><td><code>comment</code></td><td><code>string?</code></td><td><span class="opt">no</span></td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/modify-sl/{ticket}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Mover solo el Stop Loss</h3><p>El TP no se toca. `sl: 0` elimina el Stop Loss.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>ticket</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>sl</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td>Nuevo Stop Loss como precio absoluto. 0 = quitar el SL.</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/modify-tp/{ticket}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Mover solo el Take Profit</h3><p>El SL no se toca. `tp: 0` elimina el Take Profit.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>ticket</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>tp</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td>Nuevo Take Profit como precio absoluto. 0 = quitar el TP.</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/modify/{ticket}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Mover SL y/o TP de una posicion</h3><p>Omite un campo (`null`) para dejarlo como esta. Manda `0` para QUITARLO.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>ticket</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>sl</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Nuevo Stop Loss (precio absoluto). Enviar 0 para QUITAR el SL. Omitir (null) para dejarlo como esta.</td></tr><tr><td><code>tp</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Nuevo Take Profit (precio absoluto). Enviar 0 para QUITAR el TP. Omitir (null) para dejarlo como esta.</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/open</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Abrir posicion a mercado</h3><p>Ejecuta BUY o SELL a mercado.</p><p>El SL/TP se pueden dar de dos formas: como PRECIO (`sl`, `tp`) o como
+DISTANCIA en puntos (`sl_points`, `tp_points`). Si mandas ambas, gana el
+precio absoluto. Un punto es `symbol_info.point` (para EURUSD de 5 digitos,
+1 punto = 0,00001; 10 puntos = 1 pip).</p><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td><code>string</code></td><td><span class="req">si</span></td><td>Nombre exacto del simbolo en el broker.</td></tr><tr><td><code>side</code></td><td><code>"BUY" | "SELL"</code></td><td><span class="req">si</span></td><td>BUY o SELL. Ejecucion a mercado.</td></tr><tr><td><code>volume</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td>Lotes. Se ajusta al volume_step del simbolo, siempre hacia abajo.</td></tr><tr><td><code>sl</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Stop Loss como PRECIO absoluto. null = sin SL.</td></tr><tr><td><code>tp</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Take Profit como PRECIO absoluto. null = sin TP.</td></tr><tr><td><code>sl_points</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Alternativa a `sl`: distancia en puntos desde el precio de entrada. Se ignora si `sl` viene informado.</td></tr><tr><td><code>tp_points</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Alternativa a `tp`: distancia en puntos desde el precio de entrada.</td></tr><tr><td><code>deviation</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Slippage maximo aceptado, en puntos. Por defecto el del gateway (20).</td></tr><tr><td><code>magic</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Magic number de la orden. Por defecto el del gateway.</td></tr><tr><td><code>comment</code></td><td><code>string?</code></td><td><span class="opt">no</span></td><td>Comentario libre. MT5 lo trunca a 31 caracteres.</td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/pending</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Colocar orden pendiente (limit / stop)</h3><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>symbol</code></td><td><code>string</code></td><td><span class="req">si</span></td><td></td></tr><tr><td><code>type</code></td><td><code>"BUY_LIMIT" | "SELL_LIMIT" | "BUY_STOP" | "SELL_STOP"</code></td><td><span class="req">si</span></td><td>Tipo de orden pendiente.</td></tr><tr><td><code>volume</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td></td></tr><tr><td><code>price</code></td><td><code>number (double)</code></td><td><span class="req">si</span></td><td>Precio de activacion de la orden.</td></tr><tr><td><code>sl</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td></td></tr><tr><td><code>tp</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td></td></tr><tr><td><code>stoplimit</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Solo para BUY_STOP_LIMIT / SELL_STOP_LIMIT.</td></tr><tr><td><code>expiration</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td>Epoch en segundos (hora de servidor). null = GTC (sin caducidad).</td></tr><tr><td><code>magic</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td></td></tr><tr><td><code>comment</code></td><td><code>string?</code></td><td><span class="opt">no</span></td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m delete">DELETE</span> <span class="path">/trading/pending/{ticket}</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Cancelar una orden pendiente</h3><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>ticket</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><div class="ep"><span class="m post">POST</span> <span class="path">/trading/pending/{ticket}/modify</span> <span class="tok">requiere token</span><h3 style='margin-top:2mm'>Modificar una orden pendiente</h3><p>Cambia precio de activacion, SL, TP o caducidad. Los campos `null` se
+dejan como estan.</p><h4>Parametros (URL / query)</h4><table><tr><th>Nombre</th><th>En</th><th>Tipo</th><th>Obligatorio</th><th>Por defecto</th><th>Descripcion</th></tr><tr><td><code>ticket</code></td><td>path</td><td><code>integer (int64)</code></td><td><span class="req">si</span></td><td>&mdash;</td><td></td></tr></table><h4>Cuerpo de la peticion &mdash; <code>application/json</code></h4><table><tr><th>Campo</th><th>Tipo</th><th>Obligatorio</th><th>Descripcion</th></tr><tr><td><code>price</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td>Nuevo precio de activacion. null = dejarlo igual.</td></tr><tr><td><code>sl</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td></td></tr><tr><td><code>tp</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td></td></tr><tr><td><code>stoplimit</code></td><td><code>number (double)?</code></td><td><span class="opt">no</span></td><td></td></tr><tr><td><code>expiration</code></td><td><code>integer (int64)?</code></td><td><span class="opt">no</span></td><td></td></tr></table><div class="note">Sin ejemplo capturado en la ultima pasada del selftest (por ejemplo, porque dependia de un ticket que ya no existe). El contrato es el descrito en las tablas de arriba.</div></div><h2>7. Tablas de codigos</h2><p>El gateway ya envia el nombre junto al numero (por ejemplo <code>type</code> y <code>type_name</code>), asi que normalmente no necesitas estas tablas. Van aqui por si prefieres trabajar con los valores numericos en .NET.</p><h3>Tipo de orden (<code>type</code> en /orders y en el resultado)</h3><table><tr><th>Valor</th><th>Significado</th></tr><tr><td><code>0</code></td><td>BUY</td></tr><tr><td><code>1</code></td><td>SELL</td></tr><tr><td><code>2</code></td><td>BUY_LIMIT</td></tr><tr><td><code>3</code></td><td>SELL_LIMIT</td></tr><tr><td><code>4</code></td><td>BUY_STOP</td></tr><tr><td><code>5</code></td><td>SELL_STOP</td></tr><tr><td><code>6</code></td><td>BUY_STOP_LIMIT</td></tr><tr><td><code>7</code></td><td>SELL_STOP_LIMIT</td></tr><tr><td><code>8</code></td><td>CLOSE_BY</td></tr></table><h3>Tipo de posicion (<code>type</code> en /positions)</h3><table><tr><th>Valor</th><th>Significado</th></tr><tr><td><code>0</code></td><td>BUY</td></tr><tr><td><code>1</code></td><td>SELL</td></tr></table><h3>Estado de orden (<code>state</code>)</h3><table><tr><th>Valor</th><th>Significado</th></tr><tr><td><code>0</code></td><td>STARTED</td></tr><tr><td><code>1</code></td><td>PLACED</td></tr><tr><td><code>2</code></td><td>CANCELED</td></tr><tr><td><code>3</code></td><td>PARTIAL</td></tr><tr><td><code>4</code></td><td>FILLED</td></tr><tr><td><code>5</code></td><td>REJECTED</td></tr><tr><td><code>6</code></td><td>EXPIRED</td></tr><tr><td><code>7</code></td><td>REQUEST_ADD</td></tr><tr><td><code>8</code></td><td>REQUEST_MODIFY</td></tr><tr><td><code>9</code></td><td>REQUEST_CANCEL</td></tr></table><h3>Tipo de deal (<code>type</code> en /history/deals)</h3><table><tr><th>Valor</th><th>Significado</th></tr><tr><td><code>0</code></td><td>BUY</td></tr><tr><td><code>1</code></td><td>SELL</td></tr><tr><td><code>2</code></td><td>BALANCE</td></tr><tr><td><code>3</code></td><td>CREDIT</td></tr><tr><td><code>4</code></td><td>CHARGE</td></tr><tr><td><code>5</code></td><td>CORRECTION</td></tr><tr><td><code>6</code></td><td>BONUS</td></tr><tr><td><code>7</code></td><td>COMMISSION</td></tr><tr><td><code>12</code></td><td>INTEREST</td></tr><tr><td><code>15</code></td><td>DIVIDEND</td></tr><tr><td><code>17</code></td><td>TAX</td></tr></table><h3>Direccion del deal (<code>entry</code>)</h3><table><tr><th>Valor</th><th>Significado</th></tr><tr><td><code>0</code></td><td>IN (abre)</td></tr><tr><td><code>1</code></td><td>OUT (cierra)</td></tr><tr><td><code>2</code></td><td>INOUT (invierte)</td></tr><tr><td><code>3</code></td><td>OUT_BY (cierre por opuesta)</td></tr></table><h3>Motivo del deal (<code>reason</code>)</h3><table><tr><th>Valor</th><th>Significado</th></tr><tr><td><code>0</code></td><td>CLIENT</td></tr><tr><td><code>1</code></td><td>MOBILE</td></tr><tr><td><code>2</code></td><td>WEB</td></tr><tr><td><code>3</code></td><td>EXPERT</td></tr><tr><td><code>4</code></td><td>SL alcanzado</td></tr><tr><td><code>5</code></td><td>TP alcanzado</td></tr><tr><td><code>6</code></td><td>SO (stop out)</td></tr><tr><td><code>7</code></td><td>ROLLOVER</td></tr><tr><td><code>8</code></td><td>VMARGIN</td></tr><tr><td><code>9</code></td><td>SPLIT</td></tr></table><h3>Tipo de cuenta (<code>trade_mode</code>)</h3><table><tr><th>Valor</th><th>Significado</th></tr><tr><td><code>0</code></td><td>DEMO</td></tr><tr><td><code>1</code></td><td>CONTEST</td></tr><tr><td><code>2</code></td><td>REAL</td></tr></table><h3>Modo de margen (<code>margin_mode</code>)</h3><table><tr><th>Valor</th><th>Significado</th></tr><tr><td><code>0</code></td><td>RETAIL_NETTING</td></tr><tr><td><code>1</code></td><td>EXCHANGE</td></tr><tr><td><code>2</code></td><td>RETAIL_HEDGING</td></tr></table><h3>Retcodes de trading mas frecuentes</h3><table><tr><th>Codigo</th><th>Nombre</th><th>Que significa</th></tr><tr><td><code>10004</code></td><td><code>REQUOTE</code></td><td>Requote</td></tr><tr><td><code>10006</code></td><td><code>REJECT</code></td><td>Peticion rechazada</td></tr><tr><td><code>10009</code></td><td><code>DONE</code></td><td>Ejecutada correctamente</td></tr><tr><td><code>10010</code></td><td><code>DONE_PARTIAL</code></td><td>Ejecutada parcialmente</td></tr><tr><td><code>10013</code></td><td><code>INVALID</code></td><td>Peticion invalida</td></tr><tr><td><code>10014</code></td><td><code>INVALID_VOLUME</code></td><td>Volumen invalido</td></tr><tr><td><code>10015</code></td><td><code>INVALID_PRICE</code></td><td>Precio invalido</td></tr><tr><td><code>10016</code></td><td><code>INVALID_STOPS</code></td><td>SL/TP invalidos (demasiado cerca del precio)</td></tr><tr><td><code>10017</code></td><td><code>TRADE_DISABLED</code></td><td>Trading deshabilitado</td></tr><tr><td><code>10018</code></td><td><code>MARKET_CLOSED</code></td><td>Mercado cerrado</td></tr><tr><td><code>10019</code></td><td><code>NO_MONEY</code></td><td>Fondos insuficientes</td></tr><tr><td><code>10020</code></td><td><code>PRICE_CHANGED</code></td><td>El precio cambio</td></tr><tr><td><code>10027</code></td><td><code>CLIENT_DISABLES_AT</code></td><td>AutoTrading desactivado en el terminal</td></tr><tr><td><code>10030</code></td><td><code>INVALID_FILL</code></td><td>Modo de llenado no soportado</td></tr><tr><td><code>10031</code></td><td><code>CONNECTION</code></td><td>Sin conexion</td></tr><tr><td><code>10036</code></td><td><code>POSITION_CLOSED</code></td><td>La posicion ya estaba cerrada</td></tr><tr><td><code>10038</code></td><td><code>INVALID_CLOSE_VOLUME</code></td><td>Volumen de cierre superior al de la posicion</td></tr></table><div class="note">La lista completa de retcodes esta en <code>app/converters.py</code> (<code>RETCODE_NAMES</code>).</div></body></html>

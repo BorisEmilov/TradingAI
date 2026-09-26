@@ -1,0 +1,760 @@
+{
+  "categories": {
+    "fx_major_known": [
+      "EURUSD",
+      "GBPUSD",
+      "USDJPY"
+    ],
+    "metals": [
+      "XAUUSD",
+      "XAGUSD",
+      "XPDUSD",
+      "XPTUSD"
+    ],
+    "indices": [
+      "AUS200",
+      "UK100",
+      "FRA40",
+      "HK50",
+      "JPN225",
+      "US500",
+      "DE40",
+      "US30",
+      "USTEC"
+    ],
+    "rates_bonds": [
+      "BOAT",
+      "BOND",
+      "MOAT",
+      "PBTP",
+      "GILT",
+      "IBTP"
+    ],
+    "energy": [
+      "WTI"
+    ]
+  },
+  "specs": {
+    "AUS200": {
+      "path": "Indexes\\AUS200",
+      "description": "ASX 200 Index",
+      "currency_base": "AUD",
+      "currency_profit": "AUD",
+      "trade_mode": 0,
+      "swap_mode": 3,
+      "point": 0.1,
+      "digits": 1
+    },
+    "BOAT": {
+      "path": "Nasdaq\\ETF\\BOAT",
+      "description": "SonicShares Global Shipping ETF",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 0,
+      "point": 0.01,
+      "digits": 2
+    },
+    "BOND": {
+      "path": "Nasdaq\\ETF\\BOND",
+      "description": "PIMCO Active Bond Exchange-Traded Fund Exchange-Traded Fund",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 0,
+      "point": 0.01,
+      "digits": 2
+    },
+    "DE40": {
+      "path": "Indexes\\DE40",
+      "description": "Germany 40 Index",
+      "currency_base": "USD",
+      "currency_profit": "EUR",
+      "trade_mode": 0,
+      "swap_mode": 3,
+      "point": 0.01,
+      "digits": 2
+    },
+    "FRA40": {
+      "path": "Indexes\\FRA40",
+      "description": "CAC 40",
+      "currency_base": "EUR",
+      "currency_profit": "EUR",
+      "trade_mode": 0,
+      "swap_mode": 0,
+      "point": 0.1,
+      "digits": 1
+    },
+    "GILT": {
+      "path": "Nasdaq\\Stock\\GILT",
+      "description": "Gilat Satellite Networks Ltd",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 0,
+      "point": 0.01,
+      "digits": 2
+    },
+    "HK50": {
+      "path": "Indexes\\HK50",
+      "description": "HK50",
+      "currency_base": "HKD",
+      "currency_profit": "HKD",
+      "trade_mode": 0,
+      "swap_mode": 0,
+      "point": 0.1,
+      "digits": 1
+    },
+    "IBTP": {
+      "path": "Nasdaq\\ETF\\IBTP",
+      "description": "iShares iBonds Dec 2034 Term Treasury ETF",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 0,
+      "point": 0.01,
+      "digits": 2
+    },
+    "JPN225": {
+      "path": "Indexes\\JPN225",
+      "description": "Nikkei 225",
+      "currency_base": "JPY",
+      "currency_profit": "JPY",
+      "trade_mode": 0,
+      "swap_mode": 0,
+      "point": 1.0,
+      "digits": 0
+    },
+    "MOAT": {
+      "path": "Nasdaq\\ETF\\MOAT",
+      "description": "VanEck Morningstar Wide Moat ETF",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 0,
+      "point": 0.01,
+      "digits": 2
+    },
+    "PBTP": {
+      "path": "Nasdaq\\ETF\\PBTP",
+      "description": "Invesco 0-5 Yr US TIPS ETF",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 0,
+      "point": 0.01,
+      "digits": 2
+    },
+    "UK100": {
+      "path": "Indexes\\UK100",
+      "description": "FTSE 100 Index",
+      "currency_base": "GBP",
+      "currency_profit": "GBP",
+      "trade_mode": 0,
+      "swap_mode": 3,
+      "point": 0.1,
+      "digits": 1
+    },
+    "US30": {
+      "path": "Indexes\\US30",
+      "description": "US Wall Street 30 Index",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 0,
+      "swap_mode": 3,
+      "point": 0.01,
+      "digits": 2
+    },
+    "US500": {
+      "path": "Indexes\\US500",
+      "description": "US SPX 500 Index",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 0,
+      "swap_mode": 2,
+      "point": 0.01,
+      "digits": 2
+    },
+    "USTEC": {
+      "path": "Indexes\\USTEC",
+      "description": "US Tech 100 Index",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 0,
+      "swap_mode": 3,
+      "point": 0.01,
+      "digits": 2
+    },
+    "WTI": {
+      "path": "Nasdaq\\Stock\\WTI",
+      "description": "W&T Offshore Inc",
+      "currency_base": "USD",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 0,
+      "point": 0.01,
+      "digits": 2
+    },
+    "XAGUSD": {
+      "path": "Metals\\XAGUSD",
+      "description": "Silver vs US Dollar",
+      "currency_base": "XAG",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 1,
+      "point": 0.001,
+      "digits": 3
+    },
+    "XAUUSD": {
+      "path": "Metals\\XAUUSD",
+      "description": "Gold vs US Dollar",
+      "currency_base": "XAU",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 1,
+      "point": 0.01,
+      "digits": 2
+    },
+    "XPDUSD": {
+      "path": "Metals\\XPDUSD",
+      "description": "Palladium vs US Dollar",
+      "currency_base": "XPD",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 1,
+      "point": 0.001,
+      "digits": 3
+    },
+    "XPTUSD": {
+      "path": "Metals\\XPTUSD",
+      "description": "Platinum vs US Dollar",
+      "currency_base": "XPT",
+      "currency_profit": "USD",
+      "trade_mode": 4,
+      "swap_mode": 1,
+      "point": 0.001,
+      "digits": 3
+    }
+  },
+  "depth": {
+    "AUS200": {
+      "D1": {
+        "n": 1909,
+        "start": "2019-04-30",
+        "end": "2026-09-18",
+        "years": 7.39,
+        "flat_spread_at_start": false
+      },
+      "H1": {
+        "n": 42591,
+        "start": "2019-04-30",
+        "end": "2026-09-20",
+        "years": 7.39,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-06-14",
+        "end": "2026-09-20",
+        "years": 2.26,
+        "flat_spread_at_start": false
+      }
+    },
+    "BOAT": {
+      "D1": {
+        "n": 1276,
+        "start": "2021-08-05",
+        "end": "2026-09-18",
+        "years": 5.12,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 7536,
+        "start": "2021-08-05",
+        "end": "2026-09-20",
+        "years": 5.12,
+        "flat_spread_at_start": true
+      },
+      "M15": {
+        "n": 16429,
+        "start": "2021-08-06",
+        "end": "2026-09-20",
+        "years": 5.12,
+        "flat_spread_at_start": true
+      }
+    },
+    "BOND": {
+      "D1": {
+        "n": 3625,
+        "start": "2012-04-05",
+        "end": "2026-09-18",
+        "years": 14.45,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 25104,
+        "start": "2012-04-05",
+        "end": "2026-09-20",
+        "years": 14.46,
+        "flat_spread_at_start": true
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2018-12-01",
+        "end": "2026-09-20",
+        "years": 7.8,
+        "flat_spread_at_start": true
+      }
+    },
+    "DE40": {
+      "D1": {
+        "n": 3560,
+        "start": "2012-08-07",
+        "end": "2026-09-18",
+        "years": 14.11,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 50000,
+        "start": "2017-09-28",
+        "end": "2026-09-20",
+        "years": 8.97,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-04-17",
+        "end": "2026-09-20",
+        "years": 2.42,
+        "flat_spread_at_start": false
+      }
+    },
+    "FRA40": {
+      "D1": {
+        "n": 1910,
+        "start": "2019-04-30",
+        "end": "2026-09-18",
+        "years": 7.39,
+        "flat_spread_at_start": false
+      },
+      "H1": {
+        "n": 42680,
+        "start": "2019-04-30",
+        "end": "2026-09-20",
+        "years": 7.39,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-07-21",
+        "end": "2026-09-20",
+        "years": 2.17,
+        "flat_spread_at_start": false
+      }
+    },
+    "GILT": {
+      "D1": {
+        "n": 224,
+        "start": "2025-10-28",
+        "end": "2026-09-18",
+        "years": 0.89,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 1789,
+        "start": "2025-10-28",
+        "end": "2026-09-20",
+        "years": 0.89,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 6035,
+        "start": "2025-10-28",
+        "end": "2026-09-20",
+        "years": 0.89,
+        "flat_spread_at_start": false
+      }
+    },
+    "HK50": {
+      "D1": {
+        "n": 1694,
+        "start": "2019-10-24",
+        "end": "2026-09-18",
+        "years": 6.9,
+        "flat_spread_at_start": false
+      },
+      "H1": {
+        "n": 34010,
+        "start": "2019-10-24",
+        "end": "2026-09-20",
+        "years": 6.9,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-06-16",
+        "end": "2026-09-20",
+        "years": 2.26,
+        "flat_spread_at_start": false
+      }
+    },
+    "IBTP": {
+      "D1": {
+        "n": 146,
+        "start": "2026-02-20",
+        "end": "2026-09-18",
+        "years": 0.57,
+        "flat_spread_at_start": false
+      },
+      "H1": {
+        "n": 1011,
+        "start": "2026-02-20",
+        "end": "2026-09-20",
+        "years": 0.58,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 2700,
+        "start": "2026-02-21",
+        "end": "2026-09-20",
+        "years": 0.58,
+        "flat_spread_at_start": false
+      }
+    },
+    "JPN225": {
+      "D1": {
+        "n": 1917,
+        "start": "2019-04-30",
+        "end": "2026-09-18",
+        "years": 7.39,
+        "flat_spread_at_start": false
+      },
+      "H1": {
+        "n": 42479,
+        "start": "2019-04-30",
+        "end": "2026-09-20",
+        "years": 7.39,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-08-08",
+        "end": "2026-09-20",
+        "years": 2.12,
+        "flat_spread_at_start": false
+      }
+    },
+    "MOAT": {
+      "D1": {
+        "n": 3611,
+        "start": "2012-04-26",
+        "end": "2026-09-18",
+        "years": 14.4,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 25028,
+        "start": "2012-04-27",
+        "end": "2026-09-20",
+        "years": 14.4,
+        "flat_spread_at_start": true
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2018-12-14",
+        "end": "2026-09-20",
+        "years": 7.77,
+        "flat_spread_at_start": true
+      }
+    },
+    "PBTP": {
+      "D1": {
+        "n": 1854,
+        "start": "2017-09-29",
+        "end": "2026-09-18",
+        "years": 8.97,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 8720,
+        "start": "2017-09-30",
+        "end": "2026-09-20",
+        "years": 8.97,
+        "flat_spread_at_start": true
+      },
+      "M15": {
+        "n": 16395,
+        "start": "2017-09-30",
+        "end": "2026-09-20",
+        "years": 8.97,
+        "flat_spread_at_start": true
+      }
+    },
+    "UK100": {
+      "D1": {
+        "n": 615,
+        "start": "2020-09-24",
+        "end": "2026-05-15",
+        "years": 5.64,
+        "flat_spread_at_start": false
+      },
+      "H1": {
+        "n": 13200,
+        "start": "2020-09-24",
+        "end": "2026-05-16",
+        "years": 5.64,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2020-10-22",
+        "end": "2026-05-16",
+        "years": 5.56,
+        "flat_spread_at_start": true
+      }
+    },
+    "US30": {
+      "D1": {
+        "n": 3613,
+        "start": "2012-08-07",
+        "end": "2026-09-18",
+        "years": 14.11,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 50000,
+        "start": "2018-01-31",
+        "end": "2026-09-20",
+        "years": 8.64,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-06-09",
+        "end": "2026-09-20",
+        "years": 2.28,
+        "flat_spread_at_start": false
+      }
+    },
+    "US500": {
+      "D1": {
+        "n": 3612,
+        "start": "2012-08-07",
+        "end": "2026-09-18",
+        "years": 14.11,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 50000,
+        "start": "2018-02-01",
+        "end": "2026-09-20",
+        "years": 8.63,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-06-11",
+        "end": "2026-09-20",
+        "years": 2.27,
+        "flat_spread_at_start": true
+      }
+    },
+    "USTEC": {
+      "D1": {
+        "n": 1048,
+        "start": "2022-07-07",
+        "end": "2026-09-18",
+        "years": 4.2,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 23788,
+        "start": "2022-07-07",
+        "end": "2026-09-20",
+        "years": 4.2,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-06-08",
+        "end": "2026-09-20",
+        "years": 2.28,
+        "flat_spread_at_start": true
+      }
+    },
+    "WTI": {
+      "D1": {
+        "n": 5432,
+        "start": "2005-01-29",
+        "end": "2026-09-18",
+        "years": 21.63,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 37846,
+        "start": "2005-01-29",
+        "end": "2026-09-20",
+        "years": 21.64,
+        "flat_spread_at_start": true
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2018-12-21",
+        "end": "2026-09-20",
+        "years": 7.75,
+        "flat_spread_at_start": true
+      }
+    },
+    "XAGUSD": {
+      "D1": {
+        "n": 4602,
+        "start": "2008-11-08",
+        "end": "2026-09-18",
+        "years": 17.86,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 50000,
+        "start": "2018-04-12",
+        "end": "2026-09-20",
+        "years": 8.44,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-08-16",
+        "end": "2026-09-20",
+        "years": 2.09,
+        "flat_spread_at_start": false
+      }
+    },
+    "XAUUSD": {
+      "D1": null,
+      "H1": {
+        "n": 50000,
+        "start": "2018-03-24",
+        "end": "2026-09-20",
+        "years": 8.49,
+        "flat_spread_at_start": true
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-08-01",
+        "end": "2026-09-20",
+        "years": 2.14,
+        "flat_spread_at_start": false
+      }
+    },
+    "XPDUSD": {
+      "D1": {
+        "n": 2862,
+        "start": "2015-03-31",
+        "end": "2026-09-18",
+        "years": 11.47,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 50000,
+        "start": "2018-03-27",
+        "end": "2026-09-20",
+        "years": 8.48,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-08-09",
+        "end": "2026-09-20",
+        "years": 2.11,
+        "flat_spread_at_start": false
+      }
+    },
+    "XPTUSD": {
+      "D1": {
+        "n": 2877,
+        "start": "2015-03-31",
+        "end": "2026-09-18",
+        "years": 11.47,
+        "flat_spread_at_start": true
+      },
+      "H1": {
+        "n": 50000,
+        "start": "2018-04-06",
+        "end": "2026-09-20",
+        "years": 8.45,
+        "flat_spread_at_start": false
+      },
+      "M15": {
+        "n": 50000,
+        "start": "2024-08-10",
+        "end": "2026-09-20",
+        "years": 2.11,
+        "flat_spread_at_start": false
+      }
+    }
+  },
+  "volume_check": {
+    "EURUSD": {
+      "tick_volume": 137310,
+      "real_volume": 0
+    },
+    "XAUUSD": {
+      "tick_volume": 348446,
+      "real_volume": 0
+    },
+    "AUS200": {
+      "tick_volume": 19734,
+      "real_volume": 0
+    },
+    "BOAT": {
+      "tick_volume": 428,
+      "real_volume": 99487
+    },
+    "WTI": {
+      "tick_volume": 2446,
+      "real_volume": 2016748
+    }
+  },
+  "other_fx_count": 130,
+  "other_fx_sample": [
+    "AUDCAD",
+    "AUDCHF",
+    "AUDDKK",
+    "AUDHKD",
+    "AUDHUF",
+    "AUDJPY",
+    "AUDNOK",
+    "AUDNZD",
+    "AUDPLN",
+    "AUDSEK",
+    "AUDSGD",
+    "AUDTHB",
+    "AUDUSD",
+    "AUDZAR",
+    "CADCHF",
+    "CADDKK",
+    "CADJPY",
+    "CADMXN",
+    "CADNOK",
+    "CADPLN",
+    "CADSEK",
+    "CADSGD",
+    "CHFDKK",
+    "CHFHUF",
+    "CHFJPY",
+    "CHFMXN",
+    "CHFNOK",
+    "CHFPLN",
+    "CHFSEK",
+    "CHFSGD",
+    "CHFTRY",
+    "CHFZAR",
+    "CHINAH",
+    "CNHJPY",
+    "DKKJPY",
+    "DKKNOK",
+    "DKKSEK",
+    "EURAUD",
+    "EURCAD",
+    "EURCHF"
+  ]
+}

@@ -1,0 +1,15 @@
+# Dependencias del Python de WINDOWS dentro del prefijo de Wine.
+# NO son para un venv de Linux: `MetaTrader5` solo existe para Windows.
+#
+# Instalacion (una sola vez):
+#   export WINEPREFIX=$HOME/.wine-mt5
+#   PYW="$WINEPREFIX/drive_c/users/$USER/AppData/Local/Programs/Python/Python311/python.exe"
+#   wine "$PYW" -m pip install -r requirements-wine.txt
+
+MetaTrader5
+# numpy fijado: Wine 9.0 no implementa ucrtbase.dll.crealf/cimagf, que numpy>=2.0
+# necesita, y el proceso aborta al hacer "import numpy". 1.26.4 no las usa.
+numpy==1.26.4
+fastapi
+uvicorn[standard]
+pydantic
