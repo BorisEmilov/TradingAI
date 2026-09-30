@@ -58,7 +58,7 @@ from trader.mtf_strategies.live_state import (
     tp1_touched,
 )
 from trader.mtf_strategies.reversal import evaluate_reversal
-from trader.risk.levels import compute_trade_levels
+from trader.risk.levels import compute_trade_levels, limit_entry_still_ahead
 from trader.mtf_strategies.session_risk import (
     DailyLossState,
     PositionConcurrencyState,
@@ -627,6 +627,14 @@ def _attempt_execute(client: PythonGetawayClient, state: dict, config, sig, symb
         return
 
     order_type = "BUY_LIMIT" if sig.direction == "long" else "SELL_LIMIT"
+    bid, ask = client.bid_ask(symbol)
+    exec_price = ask if sig.direction == "long" else bid  # el lado contra el que MT5 valida la orden límite
+    if not limit_entry_still_ahead(sig.direction, exec_price, sig.entry, sig.tp2):
+        _log(symbol, sig.strategy, "signal_discarded_price_past_entry",
+             f"descartada antes de enviar: {order_type} con entrada teórica={sig.entry:.5f} pero el mercado "
+             f"({'ask' if sig.direction == 'long' else 'bid'}={exec_price:.5f}) ya pasó la entrada (o el tp2={sig.tp2:.5f}) "
+             f"-- MT5 la rechazaría con INVALID_PRICE; no se entra a mercado (regla de entrada sin cambios)")
+        return
     comment = f"mtf_{sig.strategy[:4]}_{(sig.setup or 'x')[:10]}"
     result = client.place_pending(
         symbol, order_type, volume=lots, price=round(sig.entry, info["digits"]),

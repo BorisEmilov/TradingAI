@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 
 from trader.mtf_strategies.signal import MTFSignal
@@ -125,7 +127,7 @@ def test_pending_order_expires_when_never_touched_inside_window():
     # responsabilidad del llamador, no de esta función).
     ts = pd.date_range("2024-01-01", periods=10, freq="15min", tz="UTC")
     df = pd.DataFrame({"timestamp": ts, "open": 110, "high": 111, "low": 109, "close": 110})
-    sig = _signal(100.0, 98.0, 102.0, 106.0, "long", ts[0])
+    sig = _signal(100.0, 98.0, 102.0, 115.0, "long", ts[0])
     deadline = ts[0] + pd.Timedelta(minutes=90)
 
     filled, freed_at = simulate_pending_order(sig, df, deadline=deadline)
@@ -142,7 +144,7 @@ def test_pending_order_touch_after_window_does_not_count_as_fill():
     high = [111, 111, 111, 111, 111, 111, 111, 100.2, 111, 111]
     low = [109, 109, 109, 109, 109, 109, 109, 99.8, 109, 109]
     df = pd.DataFrame({"timestamp": ts, "open": 110, "high": high, "low": low, "close": 110})
-    sig = _signal(100.0, 98.0, 102.0, 106.0, "long", ts[0])
+    sig = _signal(100.0, 98.0, 102.0, 115.0, "long", ts[0])
 
     filled, freed_at = simulate_pending_order(sig, df, deadline=ts[0] + pd.Timedelta(minutes=90))
 
@@ -169,3 +171,28 @@ def test_outcome_r_partial_then_tp2_and_straight_sl():
     crash = df.assign(low=[100.5, 100.5, 99.8, 97.0, 97, 97, 97, 97, 97, 97])
     _, _, _, r_sl = simulate_pending_order_outcome(sig, crash, deadline=ts[0] + pd.Timedelta(minutes=90))
     assert r_sl == -1.0
+
+
+# -- alineación con el piloto (2026-09-29): colocación en generated_at, solo si el precio no cruzó la entrada --
+
+def test_pending_order_not_placed_when_price_already_past_entry():
+    # short con entrada 100: al colocar el mercado ya está en 101 (por encima) -> MT5 la rechazaría
+    ts = pd.date_range("2024-01-01", periods=10, freq="15min", tz="UTC")
+    df = pd.DataFrame({"timestamp": ts, "open": 101, "high": 101.5, "low": 99.5, "close": 101})
+    sig = _signal(100.0, 102.0, 98.0, 94.0, "short", ts[0])
+
+    filled, freed_at, entry_time, r = simulate_pending_order_outcome(sig, df, deadline=ts[-1])
+
+    assert (filled, freed_at, entry_time, r) == (False, ts[0], None, None)
+
+
+def test_touch_before_placement_does_not_count_as_fill():
+    # el precio toca la entrada en la vela 0 (entre FVG y generated_at), la orden recién existe desde ts[2]
+    ts = pd.date_range("2024-01-01", periods=10, freq="15min", tz="UTC")
+    low = [99.8, 101, 101, 101, 101, 101, 101, 101, 101, 101]
+    df = pd.DataFrame({"timestamp": ts, "open": 101, "high": 101.5, "low": low, "close": 101})
+    sig = replace(_signal(100.0, 98.0, 102.0, 106.0, "long", ts[0]), generated_at=ts[2])
+
+    filled, _, _, _ = simulate_pending_order_outcome(sig, df, deadline=ts[-1])
+
+    assert filled is False

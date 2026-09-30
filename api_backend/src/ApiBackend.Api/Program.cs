@@ -52,6 +52,14 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 
 builder.Services.AddSingleton<CacheService>();
 
+builder.Services.AddHttpClient("PythonService", client =>
+{
+    client.BaseAddress = new Uri("http://127.0.0.1:8000");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+builder.Services.AddScoped<PythonServiceClient>();
+
 // Rate limiting: una sola instancia del store compartida por el middleware y el cleanup
 builder.Services.AddSingleton<RateLimitingCounterStore>();
 builder.Services.AddSingleton<IRateLimitingCounterStore>(sp => sp.GetRequiredService<RateLimitingCounterStore>());

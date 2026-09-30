@@ -32,6 +32,7 @@ import pandas as pd
 from trader.events import TF_DURATION
 from trader.mtf_strategies.exits import MAX_CANDLES_M15, MIN_PROGRESS_R, candles_elapsed_m15
 from trader.mtf_strategies.signal import MTFSignal
+from trader.risk.levels import limit_entry_still_ahead
 
 _STEP = TF_DURATION["M15"]
 _MAX_SEARCH_BARS = 700  # ~7 dias de M15 -- limite computacional pragmatico, no una regla de la spec
@@ -156,7 +157,16 @@ def simulate_pending_order_outcome(
     close_ts = ts + _STEP
     is_long = signal.direction == "long"
 
-    window = m15_df[(close_ts >= signal.fvg_confirmed_at) & (close_ts <= deadline)]
+    # alineado con el piloto (2026-09-29): la orden se coloca en `generated_at`
+    # (no antes -- antes no existía) y solo si en ese momento el precio todavía
+    # no había cruzado la entrada; si ya la cruzó, el piloto la descarta sin
+    # enviarla (`limit_entry_still_ahead`). Precio de colocación = apertura de
+    # la primera vela que empieza en/después de `generated_at` (sin bid/ask en OHLC).
+    placed = m15_df[ts >= signal.generated_at]
+    if len(placed) == 0 or not limit_entry_still_ahead(signal.direction, float(placed["open"].iloc[0]),
+                                                        signal.entry, signal.tp2):
+        return False, signal.generated_at, None, None
+    window = m15_df[(ts >= signal.generated_at) & (close_ts <= deadline)]
     touch_mask = (window["low"] <= signal.entry) if is_long else (window["high"] >= signal.entry)
     touched = window[touch_mask]
     if len(touched) == 0:

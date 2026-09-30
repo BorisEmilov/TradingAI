@@ -42,3 +42,13 @@ def compute_trade_levels(
         return None
 
     return TradeLevels(direction=direction, entry=entry, sl=structural_stop, tp=structural_target, risk_reward=rr)
+
+
+def limit_entry_still_ahead(direction: str, price: float, entry: float, tp2: float) -> bool:
+    """Una orden límite solo es colocable si el precio de mercado todavía NO
+    llegó a la entrada (short: precio < entrada; long: precio > entrada) y
+    tampoco pasó el TP2. Es la MISMA geometría que invalida una orden
+    pendiente (`compute_trade_levels(..., min_rr=0)` con el SL como frontera),
+    usando la entrada límite como frontera: si el precio ya la cruzó, MT5
+    rechaza la orden con INVALID_PRICE (GBPJPY 2026-09-29)."""
+    return compute_trade_levels(direction, price, entry, tp2, min_rr=0.0) is not None

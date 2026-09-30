@@ -17,7 +17,7 @@ namespace ApiBackend.Api.Data
 
         public DbSet<User> User { get; set; }
         public DbSet<RefreshDoc> RefreshDoc { get; set; }
-        public DbSet<MtAccount> MtAccount { get; set; }
+        public DbSet<MtAuthentication> MtAuthentication { get; set; }
         public DbSet<Plan> Plan { get; set; }
     }
 }

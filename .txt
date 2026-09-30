@@ -12,3 +12,4 @@ protegidas por sus SL/TP reales.
 Corre el trading automatico, python3 scripts/run_mtf_pilot.py, y monta un monitor 
 para que me actualices de todos los cambios que se produzcan en mt5, desde
 apertura de ordenes hasta movimientos de sl, tp y cierres de ordenes
+

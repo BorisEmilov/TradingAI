@@ -181,8 +181,12 @@ class PythonGetawayClient:
         return {tf: self.candles(symbol, tf, counts.get(tf, 500)) for tf in ("D1", "H1", "M15")}
 
     def last_price(self, symbol: str) -> float:
+        bid, ask = self.bid_ask(symbol)
+        return (bid + ask) / 2.0
+
+    def bid_ask(self, symbol: str) -> tuple[float, float]:
         tick = self._request("GET", f"/market/tick/{symbol}")
-        return float((tick["bid"] + tick["ask"]) / 2.0)
+        return float(tick["bid"]), float(tick["ask"])
 
     def recent_avg_spread(self, symbol: str, minutes: int = 15) -> float:
         """Spread bid-ask PROMEDIO (en precio) de los ticks reales de los últimos

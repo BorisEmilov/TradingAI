@@ -59,6 +59,9 @@ class FakeClient:
     def last_price(self, symbol):
         return self._last_price
 
+    def bid_ask(self, symbol):
+        return self._last_price - self._spread_price / 2, self._last_price + self._spread_price / 2
+
     def recent_avg_spread(self, symbol):
         return self._spread_price
 
@@ -167,7 +170,7 @@ def _patch_log_paths(monkeypatch, tmp_path) -> None:
 def test_places_limit_order_at_fvg_level_with_correct_expiration(monkeypatch, tmp_path):
     _patch_log_paths(monkeypatch, tmp_path)
     sig = _make_signal()
-    client = FakeClient(place_pending_result={"success": True, "order": 555})
+    client = FakeClient(last_price=1.10200, place_pending_result={"success": True, "order": 555})
     state = _make_state()
 
     pilot._attempt_execute(client, state, None, sig, "EURUSD", _no_spread_candles())
@@ -191,7 +194,7 @@ def test_places_limit_order_at_fvg_level_with_correct_expiration(monkeypatch, tm
 def test_places_sell_limit_for_short_signals(monkeypatch, tmp_path):
     _patch_log_paths(monkeypatch, tmp_path)
     sig = _make_signal(entry=1.10000, sl=1.10500, tp2=1.08750, direction="short")
-    client = FakeClient(place_pending_result={"success": True, "order": 556})
+    client = FakeClient(last_price=1.09800, place_pending_result={"success": True, "order": 556})
     state = _make_state()
 
     pilot._attempt_execute(client, state, None, sig, "EURUSD", _no_spread_candles())
@@ -207,7 +210,7 @@ def test_expiration_window_is_short_near_session_close(monkeypatch, tmp_path):
     _patch_log_paths(monkeypatch, tmp_path)
     generated_at = _safe_generated_at("london", minutes_before_session_end=5.0)
     sig = _make_signal(generated_at=generated_at)
-    client = FakeClient(place_pending_result={"success": True, "order": 557})
+    client = FakeClient(last_price=1.10200, place_pending_result={"success": True, "order": 557})
     state = _make_state()
 
     pilot._attempt_execute(client, state, None, sig, "EURUSD", _no_spread_candles())
@@ -458,3 +461,28 @@ def test_tp1_partial_and_breakeven_still_applied(monkeypatch, tmp_path):
     pos = state["open_positions"]["777"]
     assert client.partial_calls == [(777, 0.5)] and client.modify_sl_calls == [(777, 1.10000)]
     assert pos["partial_taken"] is True and pos["current_sl"] == pytest.approx(1.10000)
+
+
+# -- chequeo de precio pre-envío (2026-09-29, GBPJPY INVALID_PRICE) ------------
+
+def test_signal_discarded_when_market_already_past_limit_entry(monkeypatch, tmp_path):
+    _patch_log_paths(monkeypatch, tmp_path)
+    # SELL_LIMIT en 1.10000 pero el bid ya está en 1.10050 (por encima de la entrada)
+    sig = _make_signal(entry=1.10000, sl=1.10500, tp2=1.08750, direction="short")
+    client = FakeClient(last_price=1.10050)
+    state = _make_state()
+
+    pilot._attempt_execute(client, state, None, sig, "EURUSD", _no_spread_candles())
+
+    assert client.place_pending_calls == [] and state["pending_orders"] == {}
+    text = (tmp_path / "events.txt").read_text()
+    assert "signal_discarded_price_past_entry" in text and "1.10000" in text and "bid=1.10050" in text
+
+
+def test_limit_entry_still_ahead_reuses_geometry():
+    from trader.risk.levels import limit_entry_still_ahead
+    assert limit_entry_still_ahead("short", 1.0990, 1.1000, 1.0900)       # debajo de la entrada: colocable
+    assert not limit_entry_still_ahead("short", 1.1005, 1.1000, 1.0900)   # ya la cruzó
+    assert not limit_entry_still_ahead("short", 1.0890, 1.1000, 1.0900)   # ya pasó TP2
+    assert limit_entry_still_ahead("long", 1.1010, 1.1000, 1.1100)
+    assert not limit_entry_still_ahead("long", 1.0995, 1.1000, 1.1100)
