@@ -1,0 +1,60 @@
+USDJPY: 1584 bars en ventana de entrada, 460.8s, 56 señales crudas (por chequeo de vela)
+AUDUSD: 1584 bars en ventana de entrada, 356.1s, 33 señales crudas (por chequeo de vela)
+NZDUSD: 1584 bars en ventana de entrada, 391.8s, 100 señales crudas (por chequeo de vela)
+EURJPY: 1584 bars en ventana de entrada, 333.8s, 19 señales crudas (por chequeo de vela)
+{
+  "setups_unicos": 71,
+  "candidatos_rr_neto_ge_2": 69,
+  "dias_ventana": 91,
+  "actual": {
+    "n": 34,
+    "ops_por_dia": 0.374,
+    "r_medio": 0.474,
+    "total_r": 16.12,
+    "ci90_bloques": [
+      0.136,
+      0.848
+    ],
+    "P(r>0)": 0.992,
+    "dias_con_ops": 25
+  },
+  "solo_sl_vela_entrada": {
+    "n": 34,
+    "ops_por_dia": 0.374,
+    "r_medio": 0.474,
+    "total_r": 16.12,
+    "ci90_bloques": [
+      0.141,
+      0.852
+    ],
+    "P(r>0)": 0.991,
+    "dias_con_ops": 25
+  },
+  "solo_lado_ask": {
+    "n": 31,
+    "ops_por_dia": 0.341,
+    "r_medio": 0.33,
+    "total_r": 10.23,
+    "ci90_bloques": [
+      -0.078,
+      0.777
+    ],
+    "P(r>0)": 0.906,
+    "dias_con_ops": 25
+  },
+  "pesimista_completo": {
+    "n": 31,
+    "ops_por_dia": 0.341,
+    "r_medio": 0.33,
+    "total_r": 10.23,
+    "ci90_bloques": [
+      -0.071,
+      0.779
+    ],
+    "P(r>0)": 0.907,
+    "dias_con_ops": 25
+  }
+}
+
+OK: el harness reproduce la ventana de diseño (69 candidatos, n=34, +0.474R, pesimista +0.330R)
+guardado en /home/borislav/Desktop/TradingAI/trader/logs/oos_result_insample_2026-10-02.json
