@@ -5,6 +5,7 @@
 #   (mtf-pilot.service, Restart=on-failure, máx 3/h); acá solo se distingue y se avisa:
 #   código de salida 0 = parada pedida (stop flag / systemctl stop), != 0 = caída por error,
 #   unidad "failed" = systemd dejó de relanzar (crashloop). Gateway caído y heartbeat viejo -> ALERTA.
+# - En cada position_closed: scripts/live_evidence_ledger.py --enforce (R por símbolo + criterio de abandono).
 cd /home/borislav/Desktop/TradingAI/trader || exit 1
 LOG=logs/mtf_pilot_events.txt
 KINDS='pilot_started|pending_order_placed|pending_order_filled|pending_order_expired_or_cancelled|pending_order_cancelled_proactively|pending_order_rejected|position_closed|tp1_partial_and_breakeven|tp1_hit_full_close|_modified_external|external_trade_detected|daily_loss_lockout|_failed|tick_error|pilot_stopping|pilot_crashed|pilot_terminated_by_signal|session_closed'
@@ -21,7 +22,14 @@ classify_pilot() {
 }
 [ -n "$MTF_MONITOR_LIB" ] && return 0  # tests: solo cargar la función
 
-tail -F -n0 "$LOG" 2>/dev/null > >(grep -E --line-buffered "$KINDS") &
+# en cada cierre: ledger + criterio de abandono pre-registrado (--enforce para el piloto si se dispara)
+on_event() {
+  while IFS= read -r line; do
+    echo "$line"
+    [[ $line == *position_closed* ]] && OMP_NUM_THREADS=1 .venv/bin/python scripts/live_evidence_ledger.py --enforce 2>&1
+  done
+}
+tail -F -n0 "$LOG" 2>/dev/null > >(grep -E --line-buffered "$KINDS" | on_event) &
 TAIL_PID=$!  # pid real del tail (con una tubería `|` el $! sería el grep y el tail quedaría huérfano)
 trap 'echo "WATCHDOG: señal de terminación recibida ($(TZ=Europe/Sofia date +%F_%T) hora Sofía) -- watchdog saliendo, el piloto queda SIN vigilancia"; kill $TAIL_PID 2>/dev/null; pkill -P $$ 2>/dev/null; exit 0' TERM INT HUP
 
