@@ -1,0 +1,19 @@
+# Watchdog/monitor del piloto MTF. Instalar: ver deploy/systemd/README.md
+[Unit]
+Description=Watchdog y monitor de eventos del piloto MTF
+After=mtf-pilot.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/borislav/Desktop/TradingAI/trader
+ExecStart=/bin/bash /home/borislav/Desktop/TradingAI/trader/scripts/mtf_monitor.sh
+Restart=on-failure
+RestartSec=30
+# el trap TERM del script registra la salida en el log antes de terminar
+KillSignal=SIGTERM
+KillMode=mixed
+StandardOutput=append:/home/borislav/Desktop/TradingAI/trader/logs/mtf_monitor.log
+StandardError=append:/home/borislav/Desktop/TradingAI/trader/logs/mtf_monitor.log
+
+[Install]
+WantedBy=default.target

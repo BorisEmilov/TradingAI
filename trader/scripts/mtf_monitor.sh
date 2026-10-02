@@ -1,44 +1,52 @@
 #!/bin/bash
 # Monitor del piloto MTF: cada línea de stdout = un aviso.
 # - Eventos MT5 (colocación/llenado/cierre con USD/parcial/modificaciones/externos/errores).
-# - Watchdog cada 60s: piloto muerto -> ALERTA + relanzamiento automático (salvo parada
-#   intencional: último evento de sistema = session_closed/pilot_stopping); gateway caído
-#   -> ALERTA (no se relanza solo: arrancar MT5/Wine es pesado); heartbeat viejo -> ALERTA.
-# ponytail: máx 3 relanzamientos por hora, después solo alerta (evita bucle de crash).
+# - Watchdog cada 60s. Los relanzamientos del piloto los hace systemd
+#   (mtf-pilot.service, Restart=on-failure, máx 3/h); acá solo se distingue y se avisa:
+#   código de salida 0 = parada pedida (stop flag / systemctl stop), != 0 = caída por error,
+#   unidad "failed" = systemd dejó de relanzar (crashloop). Gateway caído y heartbeat viejo -> ALERTA.
 cd /home/borislav/Desktop/TradingAI/trader || exit 1
 LOG=logs/mtf_pilot_events.txt
-KINDS='pilot_started|pending_order_placed|pending_order_filled|pending_order_expired_or_cancelled|pending_order_cancelled_proactively|pending_order_rejected|position_closed|tp1_partial_and_breakeven|tp1_hit_full_close|_modified_external|external_trade_detected|daily_loss_lockout|_failed|tick_error|pilot_stopping|session_closed'
-PILOT_RE='[.]venv/bin/python -u scripts/run_mtf_pilot.py'
+KINDS='pilot_started|pending_order_placed|pending_order_filled|pending_order_expired_or_cancelled|pending_order_cancelled_proactively|pending_order_rejected|position_closed|tp1_partial_and_breakeven|tp1_hit_full_close|_modified_external|external_trade_detected|daily_loss_lockout|_failed|tick_error|pilot_stopping|pilot_crashed|pilot_terminated_by_signal|session_closed'
+UNIT=mtf-pilot.service
+
+# classify_pilot <ActiveState> <SubState> <ExecMainStatus>  -> running|stopped|already_running|crashloop|crashed
+classify_pilot() {
+  [ "$2" = auto-restart ] && { echo crashed; return; }  # caído, esperando RestartSec
+  case "$1" in
+    active|activating|reloading|deactivating) echo running ;;
+    failed) echo crashloop ;;
+    *) case "$3" in 0) echo stopped ;; 3) echo already_running ;; *) echo crashed ;; esac ;;
+  esac
+}
+[ -n "$MTF_MONITOR_LIB" ] && return 0  # tests: solo cargar la función
 
 tail -F -n0 "$LOG" 2>/dev/null | grep -E --line-buffered "$KINDS" &
+trap 'echo "WATCHDOG: señal de terminación recibida ($(TZ=Europe/Sofia date +'%F %T %Z')) -- watchdog saliendo, el piloto queda SIN vigilancia"; pkill -P $$ 2>/dev/null; exit 0' TERM INT HUP
 
-restarts=()
 state=""
+restarts=$(systemctl --user show "$UNIT" -p NRestarts --value 2>/dev/null || echo 0)
 alert() { [ "$state" != "$1" ] && echo "ALERTA WATCHDOG: $2"; state=$1; }
 
 while true; do
-  sleep 60
+  sleep 60 & wait $!  # wait: la señal se atiende al instante, no al terminar el sleep
   if ! curl -s -m 10 localhost:8000/health | grep -q '"status":"ok"'; then
     alert gw "gateway (puerto 8000) no responde -- MT5 sin conexión, el piloto no puede operar"
     continue
   fi
-  if ! pgrep -f "$PILOT_RE" >/dev/null; then
-    if grep -E "ALL +system" "$LOG" | tail -1 | grep -qE "session_closed|pilot_stopping"; then
-      alert stopped "piloto detenido intencionalmente (parada limpia) -- no se relanza"
-      continue
-    fi
-    now=$(date +%s); recent=()
-    for t in "${restarts[@]}"; do [ $((now - t)) -lt 3600 ] && recent+=("$t"); done
-    restarts=("${recent[@]}")
-    if [ ${#restarts[@]} -ge 3 ]; then
-      alert crashloop "piloto murió 3+ veces en 1h -- relanzamiento automático suspendido, revisar logs/mtf_pilot_stdout.log"
-      continue
-    fi
-    echo "ALERTA WATCHDOG: el piloto murió sin parada limpia -- últimas líneas: $(tail -3 logs/mtf_pilot_stdout.log | tr '\n' ' ') -- relanzando"
-    nohup .venv/bin/python -u scripts/run_mtf_pilot.py >> logs/mtf_pilot_stdout.log 2>&1 < /dev/null & disown
-    restarts+=("$now"); state=""
-    continue
+  props=$(systemctl --user show "$UNIT" -p ActiveState -p SubState -p ExecMainStatus -p NRestarts 2>/dev/null)
+  get() { sed -n "s/^$1=//p" <<<"$props"; }
+  active=$(get ActiveState); sub=$(get SubState); status=$(get ExecMainStatus); n=$(get NRestarts)
+  if [ "${n:-0}" -gt "${restarts:-0}" ]; then
+    echo "ALERTA WATCHDOG: systemd relanzó el piloto tras una caída (reinicio #$n desde que arrancó la unidad)"
   fi
+  restarts=${n:-0}
+  case $(classify_pilot "$active" "$sub" "$status") in
+    stopped) alert stopped "piloto detenido intencionalmente (salida 0: parada pedida) -- no se relanza"; continue ;;
+    already_running) alert dup "el piloto no arrancó: otra instancia tenía el lock (salida 3)"; continue ;;
+    crashloop) alert crashloop "piloto cayó 3+ veces en 1h, systemd dejó de relanzarlo -- revisar logs/mtf_pilot_stdout.log y 'systemctl --user status $UNIT'"; continue ;;
+    crashed) alert crashed "piloto CAÍDO POR ERROR (salida $status) -- systemd lo relanza en 30s; últimas líneas: $(tail -3 logs/mtf_pilot_stdout.log | tr '\n' ' ')"; continue ;;
+  esac
   last=$(grep "heartbeat" "$LOG" | tail -1 | sed -E 's/^\[([^]]+)\].*/\1/')
   age=$(( $(date +%s) - $(date -d "$last" +%s 2>/dev/null || echo 0) ))
   if [ "$age" -gt 2700 ]; then

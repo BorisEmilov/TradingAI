@@ -36,8 +36,9 @@ class FakeClient:
     `simulate_fill` lo mueve a `_positions` para representar un llenado."""
 
     def __init__(self, last_price: float = 1.10000, place_pending_result: dict | None = None,
-                 server_offset_hours: float = 0.0, spread_price: float = 0.0):
+                 server_offset_hours: float = 0.0, spread_price: float = 0.0, order_state: str = "EXPIRED"):
         self._last_price = last_price
+        self._order_state = order_state
         self._spread_price = spread_price
         self._place_pending_result = place_pending_result or {"success": True, "order": 999}
         self._offset = pd.Timedelta(hours=server_offset_hours)
@@ -91,7 +92,7 @@ class FakeClient:
         return list(self._positions)
 
     def order_history(self, ticket):
-        return {"orders": [{"ticket": ticket, "state_name": "EXPIRED"}]}
+        return {"orders": [{"ticket": ticket, "state_name": self._order_state}]}
 
     def position_history(self, ticket):
         return {"deals": [
@@ -112,9 +113,13 @@ class FakeClient:
         self.modify_sl_calls = getattr(self, "modify_sl_calls", []) + [(ticket, sl)]
         return {"success": True}
 
-    def simulate_fill(self, ticket: int, price_open: float, symbol: str = "EURUSD") -> None:
+    def simulate_fill(self, ticket: int, price_open: float, symbol: str = "EURUSD",
+                      fill_time_utc: pd.Timestamp | None = None) -> None:
         self._pending = [o for o in self._pending if o["ticket"] != ticket]
-        self._positions.append({"ticket": ticket, "symbol": symbol, "price_open": price_open})
+        pos = {"ticket": ticket, "symbol": symbol, "price_open": price_open}
+        if fill_time_utc is not None:  # MT5 da `time` en hora de SERVIDOR
+            pos["time"] = int((fill_time_utc + self._offset).timestamp())
+        self._positions.append(pos)
 
 
 def _safe_generated_at(session: str = "london", minutes_before_session_end: float = 30.0) -> pd.Timestamp:
@@ -486,3 +491,156 @@ def test_limit_entry_still_ahead_reuses_geometry():
     assert not limit_entry_still_ahead("short", 1.0890, 1.1000, 1.0900)   # ya pasó TP2
     assert limit_entry_still_ahead("long", 1.1010, 1.1000, 1.1100)
     assert not limit_entry_still_ahead("long", 1.0995, 1.1000, 1.1100)
+
+
+# -- bugs de ejecución (revisión 2026-10-01) ----------------------------------
+
+def _bar_at(ts: str, high: float, low: float) -> pd.DataFrame:
+    return pd.DataFrame({"timestamp": [pd.Timestamp(ts, tz="UTC")], "open": [1.1], "high": [high], "low": [low], "close": [1.1]})
+
+
+def test_bug1_tp1_ignores_m15_bar_that_started_before_the_fill(monkeypatch, tmp_path):
+    # BUY_LIMIT 1.10000 llenado a las 13:07:59 UTC; la vela 13:00-13:15 tuvo máximo 1.10600
+    # (> TP1 1.10500) ANTES de bajar a llenar -- ese máximo no es progreso de la posición.
+    _patch_log_paths(monkeypatch, tmp_path)
+    state = _make_state()
+    state["pending_orders"]["222"] = _make_pending(volume=1.0)
+    client = FakeClient(server_offset_hours=3)
+    client.simulate_fill(222, price_open=1.10000, fill_time_utc=pd.Timestamp("2026-10-01 13:07:59", tz="UTC"))
+    pilot._reconcile_pending_orders(client, state)
+
+    pilot._manage_open_positions(client, state, "EURUSD", _bar_at("2026-10-01 13:00", high=1.10600, low=1.09990))
+    assert getattr(client, "partial_calls", []) == []
+    assert state["open_positions"]["222"]["partial_taken"] is False
+
+    pilot._manage_open_positions(client, state, "EURUSD", _bar_at("2026-10-01 13:15", high=1.10600, low=1.10100))
+    assert client.partial_calls == [(222, 0.5)]  # la primera vela posterior al fill sí cuenta
+
+
+@pytest.mark.parametrize("failure", ["exception", "rejected"])
+def test_bug2_partial_never_repeated_and_breakeven_retried(monkeypatch, tmp_path, failure):
+    import requests
+    _patch_log_paths(monkeypatch, tmp_path)
+    state, client = _open_position_state(), FakeClient()
+    outcomes = iter([failure, "ok"])
+
+    def modify_sl(ticket, sl):
+        client.modify_sl_calls = getattr(client, "modify_sl_calls", []) + [(ticket, sl)]
+        out = next(outcomes)
+        if out == "exception":
+            raise requests.HTTPError("502 Bad Gateway")
+        return {"success": out == "ok", "retcode_name": "INVALID_STOPS" if out != "ok" else "DONE"}
+    client.modify_sl = modify_sl
+
+    try:  # en vivo la excepción la atrapa el try/except de _tick
+        pilot._manage_open_positions(client, state, "EURUSD", _m15_bar(high=1.10600, low=1.10000, bars_after_entry=12))
+    except Exception:  # noqa: BLE001
+        pass
+    pos = state["open_positions"]["777"]
+    assert pos["partial_taken"] is True and client.partial_calls == [(777, 0.5)]
+    assert pos["current_sl"] == pytest.approx(1.09500)  # el SL real sigue en el original
+
+    pilot._manage_open_positions(client, state, "EURUSD", _m15_bar(high=1.10600, low=1.10000, bars_after_entry=13))
+    assert client.partial_calls == [(777, 0.5)]  # NUNCA un segundo parcial
+    assert client.modify_sl_calls == [(777, 1.10000), (777, 1.10000)]  # breakeven reintentado
+    assert pos["current_sl"] == pytest.approx(1.10000) and not pos.get("breakeven_pending")
+    assert "breakeven_sl_failed" in (tmp_path / "events.txt").read_text()
+
+
+def test_bug3_fill_and_close_between_polls_counts_for_daily_loss(monkeypatch, tmp_path):
+    _patch_log_paths(monkeypatch, tmp_path)
+    state = _make_state()
+    state["pending_orders"]["444"] = _make_pending(volume=1.0)  # entrada 1.10000, SL 1.09500
+    client = FakeClient(order_state="FILLED")  # ni en /orders ni en /positions, pero el bróker la LLENÓ
+    client.position_history = lambda ticket: {"deals": [
+        {"entry_name": "IN", "price": 1.10000, "volume": 1.0, "time": 1790000000, "profit": 0.0},
+        {"entry_name": "OUT", "price": 1.09500, "volume": 1.0, "profit": -500.0, "reason_name": "SL"},
+    ]}
+
+    pilot._reconcile_pending_orders(client, state)
+
+    assert state["pending_orders"] == {} and state["open_positions"] == {}
+    assert state["daily_loss"]["cumulative_r"] == pytest.approx(-1.0)
+    log = (tmp_path / "events.txt").read_text()
+    assert "position_closed" in log and "nunca se llenó" not in log
+
+
+def _run_main(monkeypatch, tmp_path, client, tick=None, save_state=None):
+    _patch_log_paths(monkeypatch, tmp_path)
+    for name in ("STATE_PATH", "STOP_FLAG_PATH", "LOCK_PATH"):
+        monkeypatch.setattr(pilot, name, tmp_path / name.lower(), raising=False)
+    monkeypatch.setattr(pilot, "LOGS_DIR", tmp_path)
+    monkeypatch.setattr(pilot, "load_config", lambda: SimpleNamespace(gateway=None))
+    monkeypatch.setattr(pilot, "PythonGetawayClient", lambda cfg: client)
+    monkeypatch.setattr(pilot, "REFRESH_SECONDS", -1)  # refresca en cada ciclo
+    monkeypatch.setattr(pilot.time, "sleep", lambda s: None)
+    if hasattr(pilot, "signal"):
+        monkeypatch.setattr(pilot.signal, "signal", lambda *a: None)  # no tocar el handler real de pytest
+    ticks = []
+
+    def default_tick(c, state, cfg):
+        ticks.append(1)
+        if len(ticks) == 2:
+            pilot.STOP_FLAG_PATH.write_text("stop")
+    monkeypatch.setattr(pilot, "_tick", tick or default_tick)
+    if save_state:
+        monkeypatch.setattr(pilot, "_save_state", save_state)
+    return pilot.main(), ticks, (tmp_path / "events.txt").read_text()
+
+
+class _SessionClient(FakeClient):
+    def __init__(self, refresh_error=None):
+        super().__init__()
+        self.refresh_error, self.logins = refresh_error, 0
+
+    def login(self):
+        self.logins += 1
+
+    def refresh(self):
+        if self.refresh_error:
+            raise self.refresh_error
+
+    def logout(self):
+        pass
+
+
+def test_bug4_refresh_failure_does_not_kill_pilot(monkeypatch, tmp_path):
+    import requests
+    code, ticks, log = _run_main(monkeypatch, tmp_path, _SessionClient(requests.ConnectionError("gateway caído")))
+    assert code == pilot.EXIT_STOPPED and len(ticks) == 2  # siguió operando hasta la parada pedida
+    assert "refresh_failed" in log and "pilot_stopping" in log and "pilot_crashed" not in log
+
+
+def test_bug4_crash_is_distinguished_from_requested_stop(monkeypatch, tmp_path):
+    def broken_save(state):
+        raise OSError("disco lleno")
+    code, _, log = _run_main(monkeypatch, tmp_path, _SessionClient(), save_state=broken_save)
+    assert code == pilot.EXIT_CRASHED and code != pilot.EXIT_STOPPED
+    assert "pilot_crashed" in log and "pilot_stopping" not in log
+
+
+def test_single_instance_lock_blocks_second_pilot(monkeypatch, tmp_path):
+    import fcntl
+    client = _SessionClient()
+    lock_path = tmp_path / "lock_path"
+    with open(lock_path, "w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)  # otro piloto vivo
+        monkeypatch.setattr(pilot, "LOCK_PATH", lock_path)
+        monkeypatch.setattr(pilot, "LOGS_DIR", tmp_path)
+        assert pilot.main() == pilot.EXIT_ALREADY_RUNNING
+    assert client.logins == 0  # ni siquiera tocó el gateway
+
+
+def test_state_write_is_atomic(monkeypatch, tmp_path):
+    monkeypatch.setattr(pilot, "STATE_PATH", tmp_path / "state.json")
+    pilot._save_state({"open_positions": {"1": {}}, "pending_orders": {}})
+    real_dump = json.dump
+
+    def dump_then_die(obj, f, **kw):
+        f.write('{"open_positions": {"2"')  # proceso muerto a mitad de escritura
+        raise KeyboardInterrupt
+    monkeypatch.setattr(json, "dump", dump_then_die)
+    with pytest.raises(KeyboardInterrupt):
+        pilot._save_state({"open_positions": {"2": {}}, "pending_orders": {}})
+    monkeypatch.setattr(json, "dump", real_dump)
+    assert pilot._load_state()["open_positions"] == {"1": {}}  # el archivo anterior sigue intacto

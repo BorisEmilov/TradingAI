@@ -1,0 +1,25 @@
+# Piloto MTF. Instalar: ver deploy/systemd/README.md
+[Unit]
+Description=Piloto MTF (trader) contra el gateway MT5
+After=network-online.target
+# máx 3 relanzamientos por hora (misma política que tenía el watchdog); después la unidad queda "failed"
+StartLimitIntervalSec=3600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=/home/borislav/Desktop/TradingAI/trader
+Environment=OMP_NUM_THREADS=1
+ExecStart=/home/borislav/Desktop/TradingAI/trader/.venv/bin/python -u scripts/run_mtf_pilot.py
+# 0 = parada pedida (no se relanza), 1 = caída (se relanza), 3 = otra instancia tiene el lock (no se relanza)
+Restart=on-failure
+RestartSec=30
+RestartPreventExitStatus=3
+# systemctl stop -> SIGTERM -> el piloto registra pilot_terminated_by_signal y cierra la sesión del gateway
+KillSignal=SIGTERM
+TimeoutStopSec=120
+StandardOutput=append:/home/borislav/Desktop/TradingAI/trader/logs/mtf_pilot_stdout.log
+StandardError=append:/home/borislav/Desktop/TradingAI/trader/logs/mtf_pilot_stdout.log
+
+[Install]
+WantedBy=default.target

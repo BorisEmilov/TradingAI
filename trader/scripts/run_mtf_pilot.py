@@ -22,6 +22,10 @@ RESILIENCIA: mismo patrón ya validado en el piloto RSI
 `client.refresh()` periódico, nunca re-login en loop, cada ciclo protegido
 por un try/except que nunca tumba el proceso por un error transitorio.
 
+ARRANQUE EN PRODUCCIÓN: unidad systemd --user `deploy/systemd/mtf-pilot.service`
+(Restart=on-failure). Un lock (`logs/mtf_pilot.lock`) impide dos pilotos a la vez.
+Códigos de salida: 0 parada pedida, 1 caída por error, 3 otra instancia viva.
+
 PARADA: `scripts/stop_mtf_pilot.py` escribe un archivo "stop flag" que este
 bucle chequea al principio de cada ciclo -- termina el ciclo en curso
 (nunca corta a mitad) y sale. Esto SOLO deja de evaluar señales nuevas: las
@@ -31,6 +35,8 @@ posiciones ya abiertas no se tocan, siguen su curso protegidas por sus
 
 from __future__ import annotations
 
+import os
+import signal
 import sys
 import time
 import traceback
@@ -89,6 +95,43 @@ STATE_PATH = LOGS_DIR / "mtf_pilot_state.json"
 JSON_EVENTS_PATH = LOGS_DIR / "mtf_pilot_events.jsonl"
 HUMAN_EVENTS_PATH = LOGS_DIR / "mtf_pilot_events.txt"
 STOP_FLAG_PATH = LOGS_DIR / "mtf_pilot_stop.flag"
+LOCK_PATH = LOGS_DIR / "mtf_pilot.lock"
+
+# Códigos de salida (los lee systemd: Restart=on-failure relanza solo != 0, y
+# RestartPreventExitStatus=3 evita pelear con otra instancia viva).
+EXIT_STOPPED = 0          # parada pedida: stop flag, SIGTERM (systemctl stop) o Ctrl-C
+EXIT_CRASHED = 1          # caída por error -- hay que relanzar
+EXIT_ALREADY_RUNNING = 3  # otro piloto tiene el lock -- no se arranca
+
+
+class PilotTerminated(BaseException):
+    """SIGTERM recibido. BaseException para que el `except Exception` del ciclo no la trague."""
+
+    def __init__(self, signum: int):
+        super().__init__(signum)
+        self.signum = signum
+
+
+def _raise_terminated(signum, frame) -> None:
+    raise PilotTerminated(signum)
+
+
+def _acquire_single_instance_lock():
+    """flock no bloqueante sobre LOCK_PATH, retenido mientras viva el proceso
+    (el kernel lo suelta solo si el proceso muere, incluso con SIGKILL).
+    None si otro piloto ya lo tiene."""
+    import fcntl
+    fh = open(LOCK_PATH, "a+")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.close()
+        return None
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"{os.getpid()}\n")
+    fh.flush()
+    return fh
 
 
 def _log(symbol: str, strategy: str, kind: str, detail: str, desktop_title: str | None = None, **fields) -> None:
@@ -106,9 +149,15 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
+    """Atómico: temporal en el mismo directorio + os.replace. Un proceso muerto a
+    mitad de escritura deja el archivo anterior intacto, nunca uno truncado."""
     import json
-    with open(STATE_PATH, "w") as f:
+    tmp = STATE_PATH.with_name(STATE_PATH.name + ".tmp")
+    with open(tmp, "w") as f:
         json.dump(state, f, indent=2, default=str)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, STATE_PATH)
 
 
 def _daily_loss_state(state: dict, ts: pd.Timestamp) -> DailyLossState:
@@ -132,59 +181,91 @@ def _resample_h4(h1_raw: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def main() -> None:
+def main() -> int:
     LOGS_DIR.mkdir(exist_ok=True)
+    lock = _acquire_single_instance_lock()
+    if lock is None:
+        print(f"otro piloto MTF ya está corriendo (lock {LOCK_PATH} tomado) -- no se arranca un segundo", file=sys.stderr)
+        return EXIT_ALREADY_RUNNING
+    signal.signal(signal.SIGTERM, _raise_terminated)
     if STOP_FLAG_PATH.exists():
         STOP_FLAG_PATH.unlink()  # una parada anterior no debe impedir un arranque nuevo
 
-    config = load_config()
-    client = PythonGetawayClient(config.gateway)
-    client.login()
-    _log("ALL", "system", "pilot_started",
-         f"Piloto MTF (Continuación+Reversión) arrancado -- símbolos={SYMBOLS}, poll={POLL_SECONDS}s, "
-         f"risk_pct={RISK_PCT}, min_net_rr={MIN_NET_RR}",
-         desktop_title="Piloto MTF arrancado")
+    client = None
+    try:
+        config = load_config()
+        client = PythonGetawayClient(config.gateway)
+        client.login()
+        _log("ALL", "system", "pilot_started",
+             f"Piloto MTF (Continuación+Reversión) arrancado -- símbolos={SYMBOLS}, poll={POLL_SECONDS}s, "
+             f"risk_pct={RISK_PCT}, min_net_rr={MIN_NET_RR}",
+             desktop_title="Piloto MTF arrancado")
+        _run_loop(client, _load_state(), config)
+        return EXIT_STOPPED
+    except (PilotTerminated, KeyboardInterrupt) as exc:
+        name = signal.Signals(exc.signum).name if isinstance(exc, PilotTerminated) else "SIGINT"
+        _log("ALL", "system", "pilot_terminated_by_signal",
+             f"{name} recibido -- parada SOLICITADA (systemctl stop / kill / Ctrl-C), código de salida {EXIT_STOPPED}. "
+             "Las posiciones abiertas (si las hay) siguen protegidas por SL/TP reales en MT5.",
+             desktop_title="Piloto MTF detenido por señal")
+        return EXIT_STOPPED
+    except Exception as exc:  # noqa: BLE001 -- toda caída queda registrada y sale con código de error
+        _log("ALL", "system", "pilot_crashed",
+             f"CAÍDA POR ERROR (no es una parada pedida): {exc!r} -- código de salida {EXIT_CRASHED}, "
+             "systemd lo relanza (Restart=on-failure). Posiciones protegidas por SL/TP reales en MT5.",
+             desktop_title="Piloto MTF CAÍDO", trace=traceback.format_exc()[-2000:])
+        return EXIT_CRASHED
+    finally:
+        if client is not None:
+            try:
+                client.logout()
+            except Exception:  # noqa: BLE001 -- nunca tapar el código de salida real
+                pass
+            _log("ALL", "system", "session_closed",
+                 "Sesión de gateway cerrada. Las posiciones abiertas, si las hay, siguen protegidas por "
+                 "sus órdenes reales de SL/TP en MT5 -- se resuelven solas aunque este proceso no esté corriendo.")
+        lock.close()
 
-    state = _load_state()
+
+def _run_loop(client: PythonGetawayClient, state: dict, config) -> None:
+    """Vuelve solo por la stop flag. Un error en refresh o en un ciclo se registra y
+    se reintenta; lo que escape de acá (ej. no poder guardar el estado) es una caída."""
     last_refresh = time.time()
     last_heartbeat = 0.0
+    while True:
+        if STOP_FLAG_PATH.exists():
+            STOP_FLAG_PATH.unlink()
+            _log("ALL", "system", "pilot_stopping",
+                 "Comando de parada recibido -- se deja de evaluar señales nuevas. "
+                 "Las posiciones abiertas (si las hay) NO se tocan, siguen protegidas por SL/TP reales en MT5.",
+                 desktop_title="Piloto MTF detenido")
+            return
 
-    try:
-        while True:
-            if STOP_FLAG_PATH.exists():
-                STOP_FLAG_PATH.unlink()
-                _log("ALL", "system", "pilot_stopping",
-                     "Comando de parada recibido -- se deja de evaluar señales nuevas. "
-                     "Las posiciones abiertas (si las hay) NO se tocan, siguen protegidas por SL/TP reales en MT5.",
-                     desktop_title="Piloto MTF detenido")
-                break
-
-            if time.time() - last_refresh > REFRESH_SECONDS:
+        if time.time() - last_refresh > REFRESH_SECONDS:
+            try:
                 client.refresh()
                 last_refresh = time.time()
+            except Exception as exc:  # noqa: BLE001 -- gateway caído un rato no debe tumbar el piloto
+                _log("ALL", "system", "refresh_failed",
+                     f"no se pudo renovar la sesión del gateway: {exc} -- se reintenta el próximo ciclo (sin re-login)")
 
-            try:
-                _tick(client, state, config)
-            except Exception as exc:  # noqa: BLE001 -- un ciclo malo nunca debe tumbar el piloto
-                _log("ALL", "system", "tick_error", f"{exc}", trace=traceback.format_exc()[-2000:])
+        try:
+            _tick(client, state, config)
+        except Exception as exc:  # noqa: BLE001 -- un ciclo malo nunca debe tumbar el piloto
+            _log("ALL", "system", "tick_error", f"{exc}", trace=traceback.format_exc()[-2000:])
 
-            _save_state(state)
+        _save_state(state)
 
-            if time.time() - last_heartbeat > HEARTBEAT_SECONDS:
-                daily = state.get("daily_loss") or {}
-                _log("ALL", "system", "heartbeat",
-                     f"vivo -- {len(state['open_positions'])} posiciones abiertas, "
-                     f"{len(state['pending_orders'])} órdenes límite pendientes, "
-                     f"día acumulado={daily.get('cumulative_r', 0.0):+.2f}R "
-                     f"(bloqueado={daily.get('locked_out', False)})")
-                last_heartbeat = time.time()
+        if time.time() - last_heartbeat > HEARTBEAT_SECONDS:
+            daily = state.get("daily_loss") or {}
+            _log("ALL", "system", "heartbeat",
+                 f"vivo -- {len(state['open_positions'])} posiciones abiertas, "
+                 f"{len(state['pending_orders'])} órdenes límite pendientes, "
+                 f"día acumulado={daily.get('cumulative_r', 0.0):+.2f}R "
+                 f"(bloqueado={daily.get('locked_out', False)})")
+            last_heartbeat = time.time()
 
-            time.sleep(POLL_SECONDS)
-    finally:
-        client.logout()
-        _log("ALL", "system", "session_closed",
-             "Sesión de gateway cerrada. Las posiciones abiertas, si las hay, siguen protegidas por "
-             "sus órdenes reales de SL/TP en MT5 -- se resuelven solas aunque este proceso no esté corriendo.")
+        time.sleep(POLL_SECONDS)
 
 
 def _tick(client: PythonGetawayClient, state: dict, config) -> None:
@@ -247,7 +328,7 @@ def _reconcile_pending_orders(client: PythonGetawayClient, state: dict) -> None:
             continue
         pend = state["pending_orders"][ticket]
         if ticket in live_positions:
-            _promote_pending_to_position(state, ticket, pend, live_positions[ticket])
+            _promote_pending_to_position(client, state, ticket, pend, live_positions[ticket])
         else:
             _finalize_pending_gone(client, state, ticket, pend)
 
@@ -295,21 +376,39 @@ def _detect_broker_changes(client: PythonGetawayClient, state: dict) -> None:
              desktop_title=f"Operación externa en MT5: {lv.get('symbol')}", ticket=ticket)
 
 
-def _promote_pending_to_position(state: dict, ticket: str, pend: dict, live_pos: dict) -> None:
-    fill_price = float(live_pos.get("price_open", pend["entry_price"]))
+def _fill_time_utc(client: PythonGetawayClient, server_epoch) -> pd.Timestamp:
+    """Hora real del llenado en UTC desde el epoch de MT5 (hora de SERVIDOR).
+    Si falta el dato o el offset, 'ahora' -- posterior al fill real, así que
+    a lo sumo se ignora una vela de más (lado seguro: nunca un TP1 falso)."""
+    now = pd.Timestamp.now(tz="UTC")
+    if not server_epoch:
+        return now
+    try:
+        return min(pd.Timestamp(int(server_epoch), unit="s", tz="UTC") - client.server_utc_offset(), now)
+    except Exception:  # noqa: BLE001
+        return now
+
+
+def _open_position_record(pend: dict, fill_price: float, fill_time: pd.Timestamp) -> dict:
     risk_now = abs(fill_price - pend["sl"])
     tp1_actual = fill_price + risk_now if pend["direction"] == "long" else fill_price - risk_now
-    entry_ts = now_iso()
-
-    state["open_positions"][ticket] = {
+    return {
         "symbol": pend["symbol"], "strategy": pend["strategy"], "setup": pend["setup"], "direction": pend["direction"],
         "entry_price": fill_price, "initial_sl": pend["sl"], "current_sl": pend["sl"],
         "tp1": tp1_actual, "tp2": pend["tp2"],
         "volume_total": pend["volume"], "volume_remaining": pend["volume"],
-        "opened_at": entry_ts, "entry_time": entry_ts,
+        "opened_at": fill_time.isoformat(), "entry_time": fill_time.isoformat(), "fill_time": fill_time.isoformat(),
         "partial_taken": False, "last_bar_processed": None,
         "net_rr": pend["net_rr"], "signal_key": pend["signal_key"],
     }
+
+
+def _promote_pending_to_position(client: PythonGetawayClient, state: dict, ticket: str, pend: dict, live_pos: dict) -> None:
+    fill_price = float(live_pos.get("price_open", pend["entry_price"]))
+    pos = _open_position_record(pend, fill_price, _fill_time_utc(client, live_pos.get("time")))
+    tp1_actual = pos["tp1"]
+
+    state["open_positions"][ticket] = pos
     state["pending_orders"].pop(ticket, None)
     _log(pend["symbol"], pend["strategy"], "pending_order_filled",
          f"{pend['direction'].upper()} {pend['symbol']} orden límite LLENADA @ {fill_price:.5f} "
@@ -318,19 +417,47 @@ def _promote_pending_to_position(state: dict, ticket: str, pend: dict, live_pos:
 
 
 def _finalize_pending_gone(client: PythonGetawayClient, state: dict, ticket: str, pend: dict) -> None:
-    reason = "desconocido"
+    """La orden ya no está en /orders ni en /positions. El estado de la orden en
+    el historial del bróker decide: FILLED = se llenó y la posición YA cerró
+    entre dos polls (su R cuenta para el corte diario); si no, nunca se llenó.
+    Sin historial no se decide: se reintenta el próximo ciclo."""
     try:
         hist = client.order_history(int(ticket))
-        orders = hist.get("orders", [])
-        if orders:
-            reason = orders[0].get("state_name", reason)
     except Exception as exc:  # noqa: BLE001 -- no perder el ciclo por un fallo de history
-        _log(pend["symbol"], pend["strategy"], "pending_history_fetch_failed", f"ticket={ticket}: {exc}")
+        _log(pend["symbol"], pend["strategy"], "pending_history_fetch_failed",
+             f"ticket={ticket}: {exc} -- se reintentará el próximo ciclo")
+        return
+    orders = hist.get("orders", [])
+    reason = orders[0].get("state_name", "desconocido") if orders else "desconocido"
+    if reason == "FILLED":
+        _finalize_filled_and_closed_between_polls(client, state, ticket, pend)
+        return
     state["pending_orders"].pop(ticket, None)
     _log(pend["symbol"], pend["strategy"], "pending_order_expired_or_cancelled",
          f"{pend['direction'].upper()} {pend['symbol']} orden límite @ {pend['entry_price']:.5f} "
          f"ya no está activa (motivo={reason}) -- nunca se llenó, no se abrió posición",
          desktop_title=f"Orden límite expirada: {pend['symbol']}", ticket=ticket)
+
+
+def _finalize_filled_and_closed_between_polls(client: PythonGetawayClient, state: dict, ticket: str, pend: dict) -> None:
+    try:
+        pos_hist = client.position_history(int(ticket))
+    except Exception as exc:  # noqa: BLE001
+        _log(pend["symbol"], pend["strategy"], "position_history_fetch_failed",
+             f"ticket={ticket} (llenada y cerrada entre polls): {exc} -- se reintentará el próximo ciclo")
+        return
+    deals = pos_hist.get("deals", [])
+    entry = next((d for d in deals if d.get("entry_name") == "IN"), {})
+    pos = _open_position_record(pend, float(entry.get("price", pend["entry_price"])),
+                                _fill_time_utc(client, entry.get("time")))
+    state["pending_orders"].pop(ticket, None)
+    _log(pend["symbol"], pend["strategy"], "pending_order_filled",
+         f"{pend['direction'].upper()} {pend['symbol']} orden límite LLENADA @ {pos['entry_price']:.5f} "
+         f"y la posición ya CERRÓ entre dos ciclos (estado FILLED en el historial del bróker)", ticket=ticket)
+    exits = exit_deals_from_history(deals)
+    realized_r = realized_r_from_deals(pos["direction"], pos["entry_price"], pos["initial_sl"], exits)
+    reasons = sorted({d.reason_name for d in exits if d.reason_name}) or ["desconocido"]
+    _finalize_close(client, state, ticket, pos, realized_r, f"cerrada_por_broker:{'+'.join(reasons)}", hist=pos_hist)
 
 
 def _cancel_pending(client: PythonGetawayClient, state: dict, ticket: str, pend: dict, reason: str) -> None:
@@ -402,9 +529,18 @@ def _manage_open_positions(client: PythonGetawayClient, state: dict, symbol: str
     bar_close_ts = m15_raw["timestamp"].iloc[-1] + TF_DURATION["M15"]
     bar_close_str = str(bar_close_ts)
 
+    for ticket in [t for t, p in state["open_positions"].items() if p["symbol"] == symbol and p.get("breakeven_pending")]:
+        _retry_breakeven(client, state["open_positions"][ticket], ticket)
+
     for ticket in [t for t, p in state["open_positions"].items() if p["symbol"] == symbol and not p["partial_taken"]]:
         pos = state["open_positions"].get(ticket)
         if pos is None or pos.get("last_bar_processed") == bar_close_str:
+            continue
+        # la vela donde (o antes de donde) se llenó la orden no es progreso de la
+        # posición: su máximo/mínimo pudo ocurrir ANTES del fill (mismo criterio
+        # que el simulador, que arranca en la vela siguiente a la de entrada)
+        if pos.get("fill_time") and m15_raw["timestamp"].iloc[-1] < pd.Timestamp(pos["fill_time"]):
+            pos["last_bar_processed"] = bar_close_str
             continue
 
         if tp1_touched(pos["direction"], float(last_bar["high"]), float(last_bar["low"]), pos["tp1"]):
@@ -438,12 +574,13 @@ def _take_partial(client: PythonGetawayClient, state: dict, ticket: str) -> None
     if not result.get("success"):
         _log(pos["symbol"], pos["strategy"], "tp1_partial_failed", f"ticket={ticket}: {result.get('retcode_name')} -- se reintentará el próximo ciclo")
         return
-    sl_result = client.modify_sl(int(ticket), sl=pos["entry_price"])
-
+    # el parcial YA se ejecutó en el bróker: se registra antes de tocar el SL, así un
+    # fallo de modify_sl nunca provoca un segundo parcial en el próximo ciclo
     pos["partial_taken"] = True
-    pos["current_sl"] = pos["entry_price"]
     pos["volume_remaining"] = round(pos["volume_total"] - half, 8)
     pos["broker_resync"] = True  # cambios hechos por el bot, no reportarlos como modificación externa
+    pos["breakeven_pending"] = True
+    sl_result = _retry_breakeven(client, pos, ticket)
     money = _money_from_history(client, ticket)
     _log(pos["symbol"], pos["strategy"], "tp1_partial_and_breakeven",
          f"ticket={ticket} | parcial: {_money_str(money)} (realizado hasta ahora, incluye comisión de entrada) | "
@@ -452,6 +589,26 @@ def _take_partial(client: PythonGetawayClient, state: dict, ticket: str) -> None
          f"orden real modify_sl={'OK' if sl_result.get('success') else sl_result.get('retcode_name')}), "
          f"resto ({pos['volume_remaining']} lotes) sigue corriendo hasta TP2 real={pos['tp2']:.5f}",
          desktop_title=f"TP1 alcanzado: {pos['symbol']} (50% cerrado, SL a breakeven)")
+
+
+def _retry_breakeven(client: PythonGetawayClient, pos: dict, ticket: str) -> dict:
+    """Mueve el SL real a breakeven. Si MT5 lo rechaza o el gateway falla, queda
+    `breakeven_pending` y se reintenta cada ciclo hasta lograrlo (o hasta que la
+    posición cierre) -- nunca se abandona en silencio."""
+    try:
+        result = client.modify_sl(int(ticket), sl=pos["entry_price"])
+    except Exception as exc:  # noqa: BLE001
+        result = {"success": False, "retcode_name": f"error gateway: {exc}"}
+    if result.get("success"):
+        pos["breakeven_pending"] = False
+        pos["current_sl"] = pos["entry_price"]
+        pos["broker_resync"] = True
+    else:
+        _log(pos["symbol"], pos["strategy"], "breakeven_sl_failed",
+             f"ticket={ticket}: no se pudo mover el SL a breakeven {pos['entry_price']:.5f} "
+             f"({result.get('retcode_name')}) -- el SL real sigue en {pos['current_sl']:.5f}; se reintenta el próximo ciclo",
+             desktop_title=f"SL a breakeven FALLÓ: {pos['symbol']}", ticket=ticket)
+    return result
 
 
 def _money_from_history(client: PythonGetawayClient, ticket: str, hist: dict | None = None) -> dict | None:
@@ -664,4 +821,4 @@ def _attempt_execute(client: PythonGetawayClient, state: dict, config, sig, symb
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
