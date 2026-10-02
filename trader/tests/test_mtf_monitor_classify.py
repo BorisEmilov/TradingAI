@@ -26,3 +26,14 @@ def _classify(active, sub, status):
 ])
 def test_watchdog_distinguishes_requested_stop_from_crash(active, sub, status, expected):
     assert _classify(active, sub, status) == expected
+
+
+def test_watchdog_logs_termination_signal_before_exiting():
+    import signal
+    import time
+    proc = subprocess.Popen(["bash", str(SCRIPT)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    time.sleep(1.5)
+    proc.send_signal(signal.SIGTERM)
+    out, _ = proc.communicate(timeout=10)
+    assert proc.returncode == 0
+    assert "señal de terminación recibida" in out and "line" not in out  # sin errores de sintaxis del trap

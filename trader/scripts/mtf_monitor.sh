@@ -22,7 +22,7 @@ classify_pilot() {
 [ -n "$MTF_MONITOR_LIB" ] && return 0  # tests: solo cargar la función
 
 tail -F -n0 "$LOG" 2>/dev/null | grep -E --line-buffered "$KINDS" &
-trap 'echo "WATCHDOG: señal de terminación recibida ($(TZ=Europe/Sofia date +'%F %T %Z')) -- watchdog saliendo, el piloto queda SIN vigilancia"; pkill -P $$ 2>/dev/null; exit 0' TERM INT HUP
+trap 'echo "WATCHDOG: señal de terminación recibida ($(TZ=Europe/Sofia date +%F_%T) hora Sofía) -- watchdog saliendo, el piloto queda SIN vigilancia"; pkill -P $$ 2>/dev/null; exit 0' TERM INT HUP
 
 state=""
 restarts=$(systemctl --user show "$UNIT" -p NRestarts --value 2>/dev/null || echo 0)
