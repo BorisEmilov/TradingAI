@@ -130,4 +130,58 @@ El pedido dice "descargar enero–junio vía el gateway". **Los datos ya están 
 
 ## PARTE 2 — RESULTADOS
 
-*Pendiente: se completa tras la confirmación del pre-registro, sin editar la Parte 1.*
+**Corrida:** 2026-10-02, entre 11:45 y 12:30 aprox. (hora de Sofía), una sola vez.
+- **Confirmación previa del usuario:** pre-registro aprobado y uso de los CSV que ya estaban en disco, sin descarga nueva.
+- **Verificación antes de correr:** los 32 sha256 de datos y el del harness (`41f6efd718eba06d`) coincidían con la Parte 1, y no había cambios sin commitear en el código.
+- **Comando:** `scripts/oos_prereg_2026_10_02.py --window oos`. Resultado crudo en `logs/oos_result_oos_2026-10-02.json`, log en `logs/oos_run_2026-10-02.log`.
+
+### Resultados — pre-registro y resultado lado a lado
+
+| | Ventana de diseño (jun–sep 2026, in-sample) | **OOS (6 ene – 18 jun 2026)** |
+|---|---|---|
+| Setups únicos → candidatos con R:R neto ≥ 2 | 71 → 69 | 118 → 112 |
+| **Motor actual**: n / ops por día | 34 / 0.374 | 53 / 0.327 |
+| R medio | +0.474R | **+0.074R** |
+| IC 90% por bloques diarios | [+0.136, +0.848] | [−0.228, +0.402] |
+| Probabilidad de R > 0 | 0.99 | 0.65 |
+| Solo SL en la vela de entrada | +0.474R | +0.074R, IC [−0.225, +0.404] |
+| Solo lado ask | +0.330R | +0.080R, IC [−0.247, +0.431] (n=50) |
+| **Pesimista completo (métrica primaria)**: n | 31 | **50** |
+| R medio | +0.330R | **+0.080R** |
+| IC 90% por bloques diarios | [−0.071, +0.779] | **[−0.254, +0.430]** |
+| Probabilidad de R > 0 | 0.91 | 0.64 |
+| R total | +10.23R | +4.02R |
+
+### Clasificación según la regla pre-registrada (escenario pesimista)
+
+- n = 50 ≥ 30, así que la muestra es suficiente.
+- Límite inferior del IC 90% = −0.254 ≤ 0, así que **no es A**.
+- R medio = +0.080 > 0 y límite superior = +0.430 ≥ +0.33, así que **no es B**.
+- **→ RESULTADO C — INCONCLUSO.** El dato es compatible tanto con 0 como con +0.33R.
+
+### Lectura (no cambia la clasificación)
+
+- **El edge no apareció fuera de muestra con la fuerza del diseño.**
+  - La estimación puntual cae de +0.33R a **+0.08R** en el pesimista, y de +0.47R a +0.07R con el motor actual.
+  - El win rate baja del ~65% al ~50%.
+  - El límite superior (+0.43R) apenas incluye el valor de diseño. El resultado está mucho más cerca de "sin edge" que de "edge confirmado".
+- **Lo que sí se replicó:** la frecuencia (0.31–0.33 operaciones por día, frente a 0.34–0.37) y el bajo impacto del SL en la vela de entrada.
+- **Concentración:** EURUSD (+6.32R) y GBPUSD (+5.09R) sostienen casi todo el total; 6 de los 10 símbolos dan negativo. Es un descriptivo, no un hallazgo.
+- **Por estrategia y sesión** (descriptivo, motor actual): continuación +0.17R (n=23), reversión 0.00R (n=30); Londres +0.15R (n=29), Nueva York −0.02R (n=24).
+
+### Exploratorio, NO confirmatorio: subconjunto R:R neto ≥ 3
+
+El filtro salió de la ventana de diseño, así que esto no es una prueba limpia de esa hipótesis.
+
+| | n | R del subconjunto | R del resto | Diferencia, IC 90% |
+|---|---|---|---|---|
+| Motor actual | 20 / 33 | +0.156 | +0.025 | [−0.449, +0.792] |
+| Pesimista | 18 / 32 | +0.126 | +0.055 | [−0.552, +0.797] |
+
+En diseño el subconjunto daba +1.07R frente a +0.11R del resto. **Fuera de muestra la ventaja desaparece:** +0.13R frente a +0.06R, una diferencia indistinguible de 0. El hallazgo del reanálisis no se sostiene. Archivo: `logs/oos_exploratory_rr3_2026-10-02.json`.
+
+### Desvíos e incidencias
+
+- **Ningún bug técnico del motor durante la corrida.** No hubo operaciones sin resolver y las señales caen dentro de la ventana (primera 2026-01-06, última 2026-06-18).
+- **Cosmético:** el log de la corrida muestra la línea de progreso de solo 6 de los 10 símbolos, por el buffer de stdout de los procesos worker. Los 10 símbolos tienen operaciones en el resultado, así que no afecta los números.
+- **Ninguna regla ni parámetro se tocó.** La ventana OOS queda quemada.

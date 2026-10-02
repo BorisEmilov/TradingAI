@@ -1,0 +1,60 @@
+USDJPY: 3072 bars en ventana de entrada, 646.9s, 53 señales crudas (por chequeo de vela)
+AUDUSD: 3072 bars en ventana de entrada, 505.3s, 82 señales crudas (por chequeo de vela)
+USDCAD: 3072 bars en ventana de entrada, 485.3s, 12 señales crudas (por chequeo de vela)
+USDCHF: 3072 bars en ventana de entrada, 581.2s, 44 señales crudas (por chequeo de vela)
+EURGBP: 3072 bars en ventana de entrada, 487.9s, 38 señales crudas (por chequeo de vela)
+GBPJPY: 3072 bars en ventana de entrada, 432.7s, 59 señales crudas (por chequeo de vela)
+{
+  "setups_unicos": 118,
+  "candidatos_rr_neto_ge_2": 112,
+  "dias_ventana": 162,
+  "actual": {
+    "n": 53,
+    "ops_por_dia": 0.327,
+    "r_medio": 0.074,
+    "total_r": 3.94,
+    "ci90_bloques": [
+      -0.228,
+      0.402
+    ],
+    "P(r>0)": 0.652,
+    "dias_con_ops": 42
+  },
+  "solo_sl_vela_entrada": {
+    "n": 53,
+    "ops_por_dia": 0.327,
+    "r_medio": 0.074,
+    "total_r": 3.94,
+    "ci90_bloques": [
+      -0.225,
+      0.404
+    ],
+    "P(r>0)": 0.647,
+    "dias_con_ops": 42
+  },
+  "solo_lado_ask": {
+    "n": 50,
+    "ops_por_dia": 0.309,
+    "r_medio": 0.08,
+    "total_r": 4.02,
+    "ci90_bloques": [
+      -0.247,
+      0.431
+    ],
+    "P(r>0)": 0.648,
+    "dias_con_ops": 40
+  },
+  "pesimista_completo": {
+    "n": 50,
+    "ops_por_dia": 0.309,
+    "r_medio": 0.08,
+    "total_r": 4.02,
+    "ci90_bloques": [
+      -0.254,
+      0.43
+    ],
+    "P(r>0)": 0.64,
+    "dias_con_ops": 40
+  }
+}
+guardado en /home/borislav/Desktop/TradingAI/trader/logs/oos_result_oos_2026-10-02.json

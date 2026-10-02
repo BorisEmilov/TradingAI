@@ -1,0 +1,44 @@
+{
+  "actual": {
+    "n_subset": 20,
+    "r_subset": 0.156,
+    "ci90_subset": [
+      -0.354,
+      0.736
+    ],
+    "n_resto": 33,
+    "r_resto": 0.025,
+    "ci90_resto": [
+      -0.321,
+      0.384
+    ],
+    "share_total_r": 0.79,
+    "diff": 0.132,
+    "ci90_diff": [
+      -0.449,
+      0.792
+    ],
+    "P(diff>0)": 0.65
+  },
+  "pesimista_completo": {
+    "n_subset": 18,
+    "r_subset": 0.126,
+    "ci90_subset": [
+      -0.42,
+      0.783
+    ],
+    "n_resto": 32,
+    "r_resto": 0.055,
+    "ci90_resto": [
+      -0.315,
+      0.43
+    ],
+    "share_total_r": 0.56,
+    "diff": 0.071,
+    "ci90_diff": [
+      -0.552,
+      0.797
+    ],
+    "P(diff>0)": 0.58
+  }
+}
