@@ -21,8 +21,9 @@ classify_pilot() {
 }
 [ -n "$MTF_MONITOR_LIB" ] && return 0  # tests: solo cargar la función
 
-tail -F -n0 "$LOG" 2>/dev/null | grep -E --line-buffered "$KINDS" &
-trap 'echo "WATCHDOG: señal de terminación recibida ($(TZ=Europe/Sofia date +%F_%T) hora Sofía) -- watchdog saliendo, el piloto queda SIN vigilancia"; pkill -P $$ 2>/dev/null; exit 0' TERM INT HUP
+tail -F -n0 "$LOG" 2>/dev/null > >(grep -E --line-buffered "$KINDS") &
+TAIL_PID=$!  # pid real del tail (con una tubería `|` el $! sería el grep y el tail quedaría huérfano)
+trap 'echo "WATCHDOG: señal de terminación recibida ($(TZ=Europe/Sofia date +%F_%T) hora Sofía) -- watchdog saliendo, el piloto queda SIN vigilancia"; kill $TAIL_PID 2>/dev/null; pkill -P $$ 2>/dev/null; exit 0' TERM INT HUP
 
 state=""
 restarts=$(systemctl --user show "$UNIT" -p NRestarts --value 2>/dev/null || echo 0)

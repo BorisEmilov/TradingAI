@@ -37,3 +37,8 @@ def test_watchdog_logs_termination_signal_before_exiting():
     out, _ = proc.communicate(timeout=10)
     assert proc.returncode == 0
     assert "señal de terminación recibida" in out and "line" not in out  # sin errores de sintaxis del trap
+    time.sleep(0.5)
+    leftover = subprocess.run(["pgrep", "-P", str(proc.pid)], capture_output=True, text=True).stdout.split()
+    orphans = subprocess.run(["pgrep", "-f", "^tail -F -n0 logs/mtf_pilot_events"], capture_output=True, text=True).stdout.split()
+    owned = [p for p in orphans if open(f"/proc/{p}/cgroup").read().find("mtf-monitor.service") < 0]
+    assert leftover == [] and owned == []  # ningún tail huérfano fuera del servicio real
