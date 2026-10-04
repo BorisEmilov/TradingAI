@@ -15,8 +15,15 @@ dist/
 
 # Secretos
 .env
+.env.*
 !.env.example
-api_backend/src/ApiBackend.Api/appsettings.json
+api_backend/**/appsettings.json
+api_backend/**/appsettings.*.json
+!api_backend/**/appsettings.Development.json
+*.pem
+*.key
+*.pfx
+*.p12
 
 # Runtime / logs pesados
 *.pid
