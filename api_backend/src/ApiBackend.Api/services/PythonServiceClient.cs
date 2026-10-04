@@ -1,4 +1,5 @@
 using System;
+using System.Net.Http.Headers;
 
 namespace ApiBackend.Api.Services
 {
@@ -11,18 +12,33 @@ namespace ApiBackend.Api.Services
             _httpClient = httpClientFactory.CreateClient("PythonService");
         }
 
-        public async Task<T?> GetAsync<T>(string endpoint)
+        // `token`: token de sesión del gateway (Bearer). Va por petición, no en DefaultRequestHeaders,
+        // para que cada llamada lleve el token de SU cuenta MT5.
+        public async Task<T?> GetAsync<T>(string endpoint, string? token = null)
         {
-            var response = await _httpClient.GetAsync(endpoint);
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<T>();
+            using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            return await SendAsync<T>(request, token);
         }
 
-        public async Task<TResponse?> PostAsync<TRequest, TResponse>(string endpoint, TRequest body)
+        public async Task<TResponse?> PostAsync<TRequest, TResponse>(string endpoint, TRequest? body = default, string? token = null)
         {
-            var response = await _httpClient.PostAsJsonAsync(endpoint, body);
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            if (body is not null)
+            {
+                request.Content = JsonContent.Create(body);
+            }
+            return await SendAsync<TResponse>(request, token);
+        }
+
+        private async Task<T?> SendAsync<T>(HttpRequestMessage request, string? token)
+        {
+            if (!string.IsNullOrEmpty(token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+            using var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<TResponse>();
+            return await response.Content.ReadFromJsonAsync<T>();
         }
     }
 }

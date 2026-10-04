@@ -2,7 +2,7 @@ using System;
 using ApiBackend.Api.Dtos.Plan;
 using ApiBackend.Api.Mappers;
 using ApiBackend.Api.Models;
-using ApiBackend.Api.Repositories;
+using ApiBackend.Api.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -15,8 +15,8 @@ namespace ApiBackend.Api.Controllers
     [Route("api/")]
     public class PlanController : ControllerBase
     {
-        private readonly PlanRepository _planRepo;
-        public PlanController(PlanRepository planRepo)
+        private readonly IPlanRepository _planRepo;
+        public PlanController(IPlanRepository planRepo)
         {
             _planRepo = planRepo;
         }
@@ -66,7 +66,7 @@ namespace ApiBackend.Api.Controllers
         }
 
         [Authorize(Roles = nameof(Roles.ADMIN))]
-        [HttpGet]
+        [HttpPut]
         [Route("plans/update/{planId}")]
         public async Task<IActionResult> UpdatePlan(
             [FromRoute] Guid planId,
@@ -83,14 +83,14 @@ namespace ApiBackend.Api.Controllers
 
 
         [Authorize(Roles = nameof(Roles.ADMIN))]
-        [HttpGet]
-        [Route("plans/delite/{planId}")]
+        [HttpDelete]
+        [Route("plans/delete/{planId}")]
         public async Task<IActionResult> DeletePlan([FromRoute] Guid planId)
         {
             var response = await _planRepo.DeletePlan(planId);
             if(response == false)
             {
-                return BadRequest("Error deleting Plan");
+                return BadRequest("Plan not found or still assigned to users");
             }
             return Ok("Successfuly deleted");
         }

@@ -10,8 +10,8 @@ using ApiBackend.Api.Models;
 using ApiBackend.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using ApiBackend.Api.Mappers;
-using Microsoft.AspNetCore.Routing.Template;
 using System.Security.Cryptography;
+using System.Text;
 
 
 namespace ApiBackend.Api.Repositories
@@ -35,31 +35,63 @@ namespace ApiBackend.Api.Repositories
             _emailSender = emailSender;
         }
 
-        public async Task<string?> SendVerificationLink(Guid userId)
-        {
-            var randomBytes = new byte[64];
-            RandomNumberGenerator.Fill(randomBytes);
-            var token = Convert.ToBase64String(randomBytes).ToString();
+        private static readonly TimeSpan CodeTtl = TimeSpan.FromMinutes(10);
+        private const int MaxCodeAttempts = 5;
 
+        
+        private static string NewCode() => RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
+
+        private async Task StoreCode(string key, string code)
+        {
+            await _redis.SetAsync(key, code, CodeTtl);
+            await _redis.DeleteAsync($"{key}:attempts");
+        }
+
+       
+        private async Task<bool> ConsumeCode(string key, string code)
+        {
+            var stored = await _redis.GetAsync(key);
+            if (stored == null)
+            {
+                return false;
+            }
+            if (CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(stored), Encoding.UTF8.GetBytes(code ?? "")))
+            {
+                await _redis.DeleteAsync(key);
+                await _redis.DeleteAsync($"{key}:attempts");
+                return true;
+            }
+            var attempts = int.Parse(await _redis.GetAsync($"{key}:attempts") ?? "0") + 1;
+            if (attempts >= MaxCodeAttempts)
+            {
+                await _redis.DeleteAsync(key);
+                await _redis.DeleteAsync($"{key}:attempts");
+            }
+            else
+            {
+                await _redis.SetAsync($"{key}:attempts", attempts.ToString(), CodeTtl);
+            }
+            return false;
+        }
+
+        public async Task<string?> SendVerificationCode(Guid userId)
+        {
             var user = await _context.User.FirstOrDefaultAsync(u => u.Id == userId);
             if (user == null || user.Verified == true)
             {
                 return null;
             }
 
-            string verificationUrl = $"/verify/{token}";
+            var code = NewCode();
+            await StoreCode($"email-verification:{userId}", code);
+            await _emailSender.SendVerificationEmailAsync(user.Email, code);
 
-            await _emailSender.SendVerificationEmailAsync(user.Email, verificationUrl);
-
-            await _redis.SetAsync($"email-verification:{userId}", token, TimeSpan.FromMinutes(10));
-
-            return $"Verification email sent to {user.Email}";
+            return $"Verification code sent to {user.Email}";
         }
 
-        public async Task<string?> VerifyEmail(Guid userId, string token)
+        public async Task<string?> VerifyEmail(Guid userId, string code)
         {
-            var verificationInfo = await _redis.GetAsync($"email-verification:{userId}");
-            if (verificationInfo == null || verificationInfo != token)
+            if (!await ConsumeCode($"email-verification:{userId}", code))
             {
                 return null;
             }
@@ -71,8 +103,6 @@ namespace ApiBackend.Api.Repositories
             }
             user.Verified = true;
             await _context.SaveChangesAsync();
-
-            await _redis.DeleteAsync($"email-verification:{userId}");
 
             return "Email verified";
         }
@@ -86,12 +116,13 @@ namespace ApiBackend.Api.Repositories
             }
 
             var newUser = await _context.User.AddAsync(dto);
-            var verification = await SendVerificationLink(newUser.Entity.Id);
-            if (newUser == null || verification == null)
+            await _context.SaveChangesAsync();
+
+            var verification = await SendVerificationCode(newUser.Entity.Id);
+            if (verification == null)
             {
                 return null;
             }
-            await _context.SaveChangesAsync();
             return (newUser.Entity, verification);
         }
 
@@ -127,13 +158,12 @@ namespace ApiBackend.Api.Repositories
             };
 
             await _context.RefreshDoc.AddAsync(dto.FromRefreshTokenDtoToRefreshToken());
-            user.RefreshDocs.Add(dto.FromRefreshTokenDtoToRefreshToken());
             await _context.SaveChangesAsync();
 
             return (user, AccessToken, RefreshToken, ExpirityDate);
         }
 
-        public async Task<string?> RefreshAsync(string token)
+        public async Task<(string AccessToken, string RefreshToken, DateTime ExpiresAt)?> RefreshAsync(string token)
         {
             var refreshDoc = await _context.RefreshDoc
                 .Include(rd => rd.User)
@@ -157,10 +187,10 @@ namespace ApiBackend.Api.Repositories
             await _context.RefreshDoc.AddAsync(dto.FromRefreshTokenDtoToRefreshToken());
             await _context.SaveChangesAsync();
 
-            return newAccessToken;
+            return (newAccessToken, newRefreshToken, dto.ExpiresAt);
         }
 
-        public async Task<string?> SendChangePasswordLink(Guid userId)
+        public async Task<string?> SendChangePasswordCode(Guid userId)
         {
             var user = await _context.User.FirstOrDefaultAsync(u => u.Id == userId);
             if (user == null)
@@ -168,23 +198,16 @@ namespace ApiBackend.Api.Repositories
                 return null;
             }
 
-            var randomBytes = new byte[64];
-            RandomNumberGenerator.Fill(randomBytes);
-            var token = Convert.ToBase64String(randomBytes).ToString();
+            var code = NewCode();
+            await StoreCode($"password-update:{userId}", code);
+            await _emailSender.SendPasswordChangeCodeAsync(user.Email, code);
 
-            var url = $"/change-password/{token}";
-
-            await _emailSender.SendPasswordChangeLink(user.Email, url);
-
-            await _redis.SetAsync($"password-update:{userId}", token, TimeSpan.FromMinutes(10));
-
-            return $"Password change link sent to ${user.Email}";
+            return $"Password change code sent to {user.Email}";
         }
 
-        public async Task<string?> ChangePassword(Guid userId, string password, string token)
+        public async Task<string?> ChangePassword(Guid userId, string password, string code)
         {
-            var storedToken = await _redis.GetAsync($"password-update:{userId}");
-            if (storedToken == null || storedToken != token)
+            if (!await ConsumeCode($"password-update:{userId}", code))
             {
                 return null;
             }
@@ -197,8 +220,6 @@ namespace ApiBackend.Api.Repositories
 
             user.HashedPassword = password;
             await _context.SaveChangesAsync();
-
-            await _redis.DeleteAsync($"password-update:{userId}");
 
             return "Password Updated";
         }
@@ -214,7 +235,7 @@ namespace ApiBackend.Api.Repositories
                 return null;
             }
 
-            PlanTypes userPlan = user.Plan.PlanType;
+            PlanTypes userPlan = user.Plan?.PlanType ?? PlanTypes.FREE;
 
             // ! si el plan seleccionado es inferior esperar a que termine el plan actual y luego hacer update
             if (userPlan > plan.PlanType)
@@ -250,20 +271,34 @@ namespace ApiBackend.Api.Repositories
                 return null;
             }
 
-            var today = DateTime.UtcNow;
-            var expirationDate = user.PlanPaymentDate?.AddDays(30);
-
-            var reminingDays = expirationDate.Value - today;
-
-            if (reminingDays.Days > 0 || reminingDays.Hours > 0)
+            // cancelar = bajar al plan FREE (tiene que existir un Plan con PlanType FREE)
+            var freePlan = await _context.Plan.FirstOrDefaultAsync(p => p.PlanType == PlanTypes.FREE);
+            if (freePlan == null || user.PlanId == freePlan.Id)
             {
-                // ! esperar al dia para cortar los servicios
-                // ! dejar cron job que corte los servicios ese dia a esa hora
-
-                return $"Plan Cancelled, you have {reminingDays.Days} - {reminingDays.Hours} of plan";
+                return null;
             }
 
-            return "Plan is alredy Inactive";
+            var expirationDate = user.PlanPaymentDate.Value.AddDays(PlanExpirationService.PlanDurationDays);
+            var remaining = expirationDate - DateTime.UtcNow;
+
+            if (remaining > TimeSpan.Zero)
+            {
+                // el plan pagado sigue activo hasta vencer; PlanExpirationService aplica la baja ese momento
+                user.PendingPlanId = freePlan.Id;
+                await _context.SaveChangesAsync();
+                return $"Plan cancelled, it stays active until {expirationDate:yyyy-MM-dd HH:mm} UTC " +
+                       $"({remaining.Days} days {remaining.Hours} hours left)";
+            }
+
+            user.PlanId = freePlan.Id;
+            user.PendingPlanId = null;
+            user.PlanPaymentDate = DateTime.UtcNow;
+            if (user.Role is not (Roles.ADMIN or Roles.SUPER_ADMIN))
+            {
+                user.Role = Roles.FREE_USER;
+            }
+            await _context.SaveChangesAsync();
+            return "Plan cancelled";
         }
 
         public async Task<Plan?> GetUserPlan(Guid userId)

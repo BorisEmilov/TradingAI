@@ -9,68 +9,49 @@ namespace ApiBackend.Api.Services
 {
     public class SendEmailService
     {
-        private const string SmtpHost = "smtp.gmail.com";
-        private const int SmtpPort = 587;
-        private const string SenderEmail = "companyEmail";
-        private const string SenderName = "CompanyName";
-        private string Password = "App_password";
+        private readonly IConfiguration _config;
+
+        public SendEmailService(IConfiguration config)
+        {
+            _config = config;
+        }
 
         public async Task SendEmailAsync(string toEmail, string subject, string body)
         {
             var message = new MimeMessage();
-            message.From.Add(new MailboxAddress(SenderName, SenderEmail));
+            var settings = _config.GetSection("EmailSettings");
+            message.From.Add(new MailboxAddress(settings["SenderName"], settings["SenderEmail"]));
             message.To.Add(new MailboxAddress("", toEmail));
             message.Subject = subject;
             message.Body = new TextPart("html") { Text = body };
 
             using var client = new SmtpClient();
-            await client.ConnectAsync(SmtpHost, SmtpPort, SecureSocketOptions.StartTls);
-            await client.AuthenticateAsync(SenderEmail, Password);
+            await client.ConnectAsync(settings["SmtpHost"], int.Parse(settings["SmtpPort"]!), SecureSocketOptions.StartTls);
+            await client.AuthenticateAsync(settings["Username"], settings["Password"]);
             await client.SendAsync(message);
             await client.DisconnectAsync(true);
         }
 
-        public async Task SendVerificationEmailAsync(string toEmail, string verifyUrl)
-        {
-            var verificationLink = verifyUrl;
-
-
-            var body = $@"
+        private static string CodeBody(string title, string intro, string code) => $@"
            <html>
            <body style='font-family: Arial, sans-serif;'>
-               <h2>¡Wellcome!</h2>
-               <p>Please verify your email by clicking the following link:</p>
-               <a href='{verificationLink}' style='background:#4CAF50; color:white; padding:12px 20px; border-radius:4px; text-decoration:none;'>
-                   Verify yout email
-               </a>
-               <p>The link expires in 10 minutes</p>
+               <h2>{title}</h2>
+               <p>{intro}</p>
+               <p style='font-size:32px; font-weight:bold; letter-spacing:8px;'>{code}</p>
+               <p>The code expires in 10 minutes. If you did not request it, ignore this email.</p>
            </body>
            </html>";
 
-
-            await SendEmailAsync(toEmail, "no-replay Email Verification", body);
+        public async Task SendVerificationEmailAsync(string toEmail, string code)
+        {
+            var body = CodeBody("¡Welcome!", "Enter this code in the app to verify your email:", code);
+            await SendEmailAsync(toEmail, "Email verification code", body);
         }
 
-
-        public async Task SendPasswordChangeLink(string toEmail, string verifyUrl)
+        public async Task SendPasswordChangeCodeAsync(string toEmail, string code)
         {
-            var verificationLink = verifyUrl;
-
-
-            var body = $@"
-           <html>
-           <body style='font-family: Arial, sans-serif;'>
-               <h2>¡Wellcome!</h2>
-               <p>Click the link to cjange your password:</p>
-               <a href='{verificationLink}' style='background:#4CAF50; color:white; padding:12px 20px; border-radius:4px; text-decoration:none;'>
-                   Change your password
-               </a>
-               <p>The link expires in 10 minutes</p>
-           </body>
-           </html>";
-
-
-            await SendEmailAsync(toEmail, "no-replay Password Change", body);
+            var body = CodeBody("Password change", "Enter this code in the app to change your password:", code);
+            await SendEmailAsync(toEmail, "Password change code", body);
         }
 
     };

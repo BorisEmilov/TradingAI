@@ -27,6 +27,7 @@ namespace ApiBackend.Api.Repositories
             }
 
             var newPlan = await _context.Plan.AddAsync(dto);
+            await _context.SaveChangesAsync();
 
             return newPlan.Entity;
         }
@@ -69,6 +70,12 @@ namespace ApiBackend.Api.Repositories
         {
             var plan = await _context.Plan.FirstOrDefaultAsync(p => p.Id == planId);
             if(plan == null)
+            {
+                return false;
+            }
+
+            var inUse = await _context.User.AnyAsync(u => u.PlanId == planId || u.PendingPlanId == planId);
+            if(inUse)
             {
                 return false;
             }

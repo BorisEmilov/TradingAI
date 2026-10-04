@@ -17,7 +17,6 @@ namespace ApiBackend.Api.Mappers
                 Id = user.Id,
                 Email = user.Email,
                 FullName = user.FullName,
-                HashedPassword = user.HashedPassword,
                 Role = user.Role,
                 PlanId = user.PlanId,
                 PlanPaymentDate = user.PlanPaymentDate,

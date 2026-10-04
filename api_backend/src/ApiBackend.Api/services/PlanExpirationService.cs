@@ -8,6 +8,7 @@ namespace ApiBackend.Api.Services
     public class PlanExpirationService : BackgroundService
     {
         private readonly IServiceScopeFactory _scopeFactory;
+        public const int PlanDurationDays = 30;  // también la usa UserRepository.CancellPlan
 
         public PlanExpirationService(IServiceScopeFactory scopeFactory)
         {
@@ -30,23 +31,24 @@ namespace ApiBackend.Api.Services
                     .Include(u => u.PendingPlan)
                     .Where(u =>
                         u.PlanPaymentDate != null &&
-                        u.PlanPaymentDate <= now &&
+                        u.PlanPaymentDate <= now.AddDays(-PlanDurationDays) &&
                         u.PendingPlanId != null)
                     .ToListAsync(stoppingToken);
 
                 foreach (var user in users)
                 {
+                    var newPlan = user.PendingPlan;  // user.Plan sigue siendo el plan VIEJO
                     user.PlanId = user.PendingPlanId;
                     user.PendingPlanId = null;
                     user.PlanPaymentDate = now;
 
-                    if (user.Plan != null)
+                    if (newPlan != null && user.Role is not (Roles.ADMIN or Roles.SUPER_ADMIN))
                     {
-                        user.Role = user.Plan.PlanType switch
+                        user.Role = newPlan.PlanType switch
                         {
                             PlanTypes.PLUS => Roles.PLUS_USER,
                             PlanTypes.GOLDEN => Roles.GOLDEN_USER,
-                            _ => user.Role
+                            _ => Roles.FREE_USER
                         };
                     }
                 }

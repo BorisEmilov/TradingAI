@@ -13,7 +13,6 @@ namespace ApiBackend.Api.Dtos.User
         public Guid Id { get; set; }
         public string Email { get; set; }
         public string FullName { get; set; }
-        public string HashedPassword { get; set; }
         public Roles? Role { get; set; }
         public Guid? PlanId { get; set; }
         public DateTime? PlanPaymentDate { get; set; }

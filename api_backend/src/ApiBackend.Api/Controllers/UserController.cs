@@ -2,7 +2,7 @@ using System.Security.Claims;
 using ApiBackend.Api.Dtos.User;
 using ApiBackend.Api.Mappers;
 using ApiBackend.Api.RateLimiting;
-using ApiBackend.Api.Repositories;
+using ApiBackend.Api.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,8 +12,8 @@ namespace ApiBackend.Api.Controllers;
 [Route("api/")]
 public class UserController : ControllerBase
 {
-    private readonly UserRepository _userRepo;
-    public UserController(UserRepository userRepo)
+    private readonly IUserRepository _userRepo;
+    public UserController(IUserRepository userRepo)
     {
         _userRepo = userRepo;
     }
@@ -54,18 +54,18 @@ public class UserController : ControllerBase
     [HttpPost]
     [RateLimit(limitRequests: 10, windowSeconds: 60)]
     [Route("login")]
-    public async Task<IActionResult> Login([FromBody] string email, [FromBody] string password)
+    public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
-        if(email == null)
+        if(string.IsNullOrWhiteSpace(dto.Email))
         {
             return BadRequest("Enter valid email");
         }
-        if(password == null)
+        if(string.IsNullOrWhiteSpace(dto.Password))
         {
             return BadRequest("Enter valid password");
         }
 
-        var result =  await _userRepo.Login(email, password);
+        var result =  await _userRepo.Login(dto.Email, dto.Password);
         if(result == null)
         {
             return BadRequest();
@@ -78,14 +78,13 @@ public class UserController : ControllerBase
             HttpOnly = true,
             Secure = true,
             SameSite = SameSiteMode.Strict,
-            Expires = DateTime.UtcNow.AddDays(7)
+            Expires = ExpirityDate
         });
 
         return Ok(new {User = user.FromUserToGetUserDto(), accessToken = AccessToken});
     }
 
     [HttpPost]
-    [Authorize]
     [RateLimit(limitRequests: 30, windowSeconds: 60)]
     [Route("refresh")]
     public async Task<IActionResult> Refresh()
@@ -96,41 +95,50 @@ public class UserController : ControllerBase
             return Unauthorized();
         }
 
-        var response = _userRepo.RefreshAsync(refreshToken);
+        var response = await _userRepo.RefreshAsync(refreshToken);
         if(response == null)
         {
             return Unauthorized();
         }
 
-        return Ok(new { AccessToken = response });
+        var (accessToken, newRefreshToken, expiresAt) = response.Value;
+        Response.Cookies.Append("refreshToken", newRefreshToken, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.Strict,
+            Expires = expiresAt
+        });
+
+        return Ok(new { AccessToken = accessToken });
     }
 
     
-    [HttpGet]
+    [HttpPost]
     [Authorize]
     [RateLimit(limitRequests: 1, windowSeconds: 60)]
-    [Route("/send-verification-link")]
-    public async Task<IActionResult> SendVerificationLink()
+    [Route("send-verification-code")]
+    public async Task<IActionResult> SendVerificationCode()
     {
-        var response = await _userRepo.SendVerificationLink(Guid.Parse(ClaimTypes.NameIdentifier));
+        var response = await _userRepo.SendVerificationCode(Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!));
         if(response == null)
         {
-            return Unauthorized();
+            return BadRequest("User not found or already verified");
         }
         return Ok(new { msg = response });
     }
 
 
-    [HttpPatch]
-    [Route("/verify/{token}")]
-    public async Task<IActionResult> VerifyEmail(
-        [FromRoute] string token
-    )
+    [HttpPost]
+    [Authorize]
+    [RateLimit(limitRequests: 5, windowSeconds: 60)]
+    [Route("verify-email")]
+    public async Task<IActionResult> VerifyEmail([FromBody] VerifyCodeDto dto)
     {
-        var response = await _userRepo.VerifyEmail(Guid.Parse(ClaimTypes.NameIdentifier), token);
+        var response = await _userRepo.VerifyEmail(Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), dto.Code);
         if(response == null)
         {
-            return BadRequest();
+            return BadRequest("Invalid or expired code");
         }
 
         return Ok(new { msg = response });
@@ -141,7 +149,7 @@ public class UserController : ControllerBase
     [Route("my-profile")]
     public async Task<IActionResult> getMyProfile()
     {
-        var user = await _userRepo.GetUserById(Guid.Parse(ClaimTypes.NameIdentifier));
+        var user = await _userRepo.GetUserById(Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!));
         if(user == null)
         {
             return NotFound();
@@ -149,13 +157,13 @@ public class UserController : ControllerBase
         return Ok(user.FromUserToGetUserDto());
     }
 
-    [HttpPatch]
+    [HttpPost]
     [Authorize]
     [RateLimit(limitRequests: 1, windowSeconds: 60)]
-    [Route("password-update/send-link")]
-    public async Task<IActionResult> SendUpdatePasswordLink()
+    [Route("password-update/send-code")]
+    public async Task<IActionResult> SendUpdatePasswordCode()
     {
-        var response = await _userRepo.SendChangePasswordLink(Guid.Parse(ClaimTypes.NameIdentifier));
+        var response = await _userRepo.SendChangePasswordCode(Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!));
         if(response == null)
         {
             return BadRequest();
@@ -165,11 +173,9 @@ public class UserController : ControllerBase
 
     [HttpPatch]
     [Authorize]
-    [Route("change-password/{token}")]
-    public async Task<IActionResult> UpdatePassword(
-        [FromRoute] string token,
-        [FromBody] UpdatePasswordDto dto
-    )
+    [RateLimit(limitRequests: 5, windowSeconds: 60)]
+    [Route("change-password")]
+    public async Task<IActionResult> UpdatePassword([FromBody] UpdatePasswordDto dto)
     {
         if(dto.Password != dto.RepeatPassword)
         {
@@ -178,17 +184,21 @@ public class UserController : ControllerBase
 
         string hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.Password);
 
-        string response = await _userRepo.ChangePassword(Guid.Parse(ClaimTypes.NameIdentifier), hashedPassword, token);
+        var response = await _userRepo.ChangePassword(Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), hashedPassword, dto.Code);
+        if(response == null)
+        {
+            return BadRequest("Invalid or expired code");
+        }
 
         return Ok(new { msg = response });
     }
 
-    [HttpPatch]
+    [HttpDelete]
     [Authorize]
     [Route("my-profile/delete")]
     public async Task<IActionResult> DeleteProfile()
     {
-        var response = await _userRepo.DeleteUser(Guid.Parse(ClaimTypes.NameIdentifier));
+        var response = await _userRepo.DeleteUser(Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!));
         if(response == false)
         {
             return BadRequest();

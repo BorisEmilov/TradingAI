@@ -24,6 +24,8 @@ builder.Services.AddDbContext<ApplicationDBContext>(options =>
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IPlanRepository, PlanRepository>();
+builder.Services.AddScoped<IMtAccountRepository, MtAccountRepository>();
+builder.Services.AddScoped<SendEmailService>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
